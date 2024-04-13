@@ -1,0 +1,11 @@
+1、idea 调试
+
+    按照resources目录下进行canal 实例配置即可, 启动CanalLauncher
+
+2、打包测试
+
+    mvn assembly:assembly
+
+    将logback复制到conf目录下, 如果是idea测试，需要将logback.xml从resources目录下移除，否则会不打印日志
+
+    启动 sh startup.sh ../conf/canal.properties & tail -f ../logs/....
