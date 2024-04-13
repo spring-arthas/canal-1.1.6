@@ -30,7 +30,6 @@ public class CanalLauncher {
     public static final CountDownLatch      runningLatch         = new CountDownLatch(1);
     private static ScheduledExecutorService executor             = Executors.newScheduledThreadPool(1,
                                                                      new NamedThreadFactory("canal-server-scan"));
-
     public static void main(String[] args) {
         try {
             logger.info("## set default uncaught exception handler");
