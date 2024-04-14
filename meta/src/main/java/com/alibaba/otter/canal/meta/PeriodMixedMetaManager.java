@@ -103,6 +103,7 @@ public class PeriodMixedMetaManager extends MemoryMetaManager implements CanalMe
         batches.clear();
     }
 
+    @Override
     public void subscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.subscribe(clientIdentity);
 
@@ -110,6 +111,7 @@ public class PeriodMixedMetaManager extends MemoryMetaManager implements CanalMe
         executor.submit(() -> zooKeeperMetaManager.subscribe(clientIdentity));
     }
 
+    @Override
     public void unsubscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.unsubscribe(clientIdentity);
 
@@ -117,11 +119,13 @@ public class PeriodMixedMetaManager extends MemoryMetaManager implements CanalMe
         executor.submit(() -> zooKeeperMetaManager.unsubscribe(clientIdentity));
     }
 
+    @Override
     public void updateCursor(ClientIdentity clientIdentity, Position position) throws CanalMetaManagerException {
         super.updateCursor(clientIdentity, position);
         updateCursorTasks.add(clientIdentity);// 添加到任务队列中进行触发
     }
 
+    @Override
     public Position getCursor(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         Position position = super.getCursor(clientIdentity);
         if (position == nullCursor) {

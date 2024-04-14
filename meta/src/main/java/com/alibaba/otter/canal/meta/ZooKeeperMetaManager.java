@@ -60,6 +60,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         super.stop();
     }
 
+    @Override
     public void subscribe(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getClientIdNodePath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -89,18 +90,21 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         }
     }
 
+    @Override
     public boolean hasSubscribe(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getClientIdNodePath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
         return zkClientx.exists(path);
     }
 
+    @Override
     public void unsubscribe(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getClientIdNodePath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
         zkClientx.deleteRecursive(path); // 递归删除所有信息
     }
 
+    @Override
     public List<ClientIdentity> listAllSubscribeInfo(String destination) throws CanalMetaManagerException {
         if (zkClientx == null) { //重新加载时可能为空
             return new ArrayList<>();
@@ -142,6 +146,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         return clientIdentities;
     }
 
+    @Override
     public Position getCursor(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getCursorPath(clientIdentity.getDestination(), clientIdentity.getClientId());
 
@@ -153,6 +158,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         return JsonUtils.unmarshalFromByte(data, Position.class);
     }
 
+    @Override
     public void updateCursor(ClientIdentity clientIdentity, Position position) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getCursorPath(clientIdentity.getDestination(), clientIdentity.getClientId());
         byte[] data = JsonUtils.marshalToByte(position, JSONWriter.Feature.WriteClassName);
@@ -163,6 +169,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         }
     }
 
+    @Override
     public Long addBatch(ClientIdentity clientIdentity, PositionRange positionRange) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -173,6 +180,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         return ZookeeperPathUtils.getBatchMarkId(batchIdString);
     }
 
+    @Override
     public void addBatch(ClientIdentity clientIdentity, PositionRange positionRange,
                          Long batchId) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils
@@ -181,6 +189,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         zkClientx.createPersistent(path, data, true);
     }
 
+    @Override
     public PositionRange removeBatch(ClientIdentity clientIdentity, Long batchId) throws CanalMetaManagerException {
         String batchsPath = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -215,6 +224,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         return positionRange;
     }
 
+    @Override
     public PositionRange getBatch(ClientIdentity clientIdentity, Long batchId) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils
             .getBatchMarkWithIdPath(clientIdentity.getDestination(), clientIdentity.getClientId(), batchId);
@@ -227,6 +237,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         return positionRange;
     }
 
+    @Override
     public void clearAllBatchs(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         String path = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -238,6 +249,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         }
     }
 
+    @Override
     public PositionRange getLastestBatch(ClientIdentity clientIdentity) {
         String path = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -265,6 +277,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         }
     }
 
+    @Override
     public PositionRange getFirstBatch(ClientIdentity clientIdentity) {
         String path = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());
@@ -292,6 +305,7 @@ public class ZooKeeperMetaManager extends AbstractCanalLifeCycle implements Cana
         }
     }
 
+    @Override
     public Map<Long, PositionRange> listAllBatchs(ClientIdentity clientIdentity) {
         String path = ZookeeperPathUtils.getBatchMarkPath(clientIdentity.getDestination(),
             clientIdentity.getClientId());

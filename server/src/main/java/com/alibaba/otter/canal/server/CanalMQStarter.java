@@ -15,28 +15,27 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * @author debugcode
+ */
 public class CanalMQStarter {
-
     private static final Logger          logger         = LoggerFactory.getLogger(CanalMQStarter.class);
-
     private volatile boolean             running        = false;
-
     private ExecutorService              executorService;
-
+    /**
+     * canalMQ公共生产者对象
+     * */
     private CanalMQProducer              canalMQProducer;
-
     private MQProperties                 mqProperties;
-
     private CanalServerWithEmbedded      canalServer;
-
     private Map<String, CanalMQRunnable> canalMQWorks   = new ConcurrentHashMap<>();
-
     private static Thread                shutdownThread = null;
 
     public CanalMQStarter(CanalMQProducer canalMQProducer){
@@ -54,23 +53,25 @@ public class CanalMQStarter {
                 System.setProperty("canal.instance.filter.transaction.entry", "true");
             }
 
+            // 1. 创建CanalServerWithEmbedded实例，
             canalServer = CanalServerWithEmbedded.instance();
-
             // 对应每个instance启动一个worker线程
             executorService = Executors.newCachedThreadPool();
-            logger.info("## start the MQ workers.");
 
+            // 2. 按逗号分隔出要启动的canal实例信息
             String[] dsts = StringUtils.split(destinations, ",");
             for (String destination : dsts) {
                 destination = destination.trim();
+                // 2.1 为当前实例创建CanalMQRunnable
                 CanalMQRunnable canalMQRunnable = new CanalMQRunnable(destination);
+                // 2.2 缓存当前实例名称和canalMQRunnable
                 canalMQWorks.put(destination, canalMQRunnable);
+                // 2.3 启动当前实例对应的CanalMQRunnable
                 executorService.execute(canalMQRunnable);
             }
 
             running = true;
             logger.info("## the MQ workers is running now ......");
-
             shutdownThread = new Thread(() -> {
                 try {
                     logger.info("## stop the MQ workers");
@@ -83,7 +84,6 @@ public class CanalMQStarter {
                     logger.info("## canal MQ is down.");
                 }
             });
-
             Runtime.getRuntime().addShutdownHook(shutdownThread);
         } catch (Throwable e) {
             logger.error("## Something goes wrong when starting up the canal MQ workers:", e);
@@ -104,6 +104,9 @@ public class CanalMQStarter {
         }
     }
 
+    /**
+     * 启动指定实例对应的CanalMQRunnable，这是在canal-admin平台增量新建实例后会调用该方法进行处理
+     * */
     public synchronized void startDestination(String destination) {
         CanalInstance canalInstance = canalServer.getCanalInstances().get(destination);
         if (canalInstance != null) {
@@ -124,6 +127,29 @@ public class CanalMQStarter {
         }
     }
 
+    private class CanalMQRunnable implements Runnable {
+
+        private String destination;
+
+        CanalMQRunnable(String destination){
+            this.destination = destination;
+        }
+
+        private AtomicBoolean running = new AtomicBoolean(true);
+
+        @Override
+        public void run() {
+            worker(destination, running);
+        }
+
+        public void stop() {
+            running.set(false);
+        }
+    }
+
+    /**
+     * 一个CanalMQRunnable对应一个Worker，且只能启动一次, 目标是从EventStore中获取解析后的Entry数据封装进Message中，并发送到消息中心
+     * */
     private void worker(String destination, AtomicBoolean destinationRunning) {
         while (!running || !destinationRunning.get()) {
             try {
@@ -138,8 +164,9 @@ public class CanalMQStarter {
         final ClientIdentity clientIdentity = new ClientIdentity(destination, (short) 1001, "");
         while (running && destinationRunning.get()) {
             try {
+                // 获取destinatin指定的canalInstance
                 CanalInstance canalInstance = canalServer.getCanalInstances().get(destination);
-                if (canalInstance == null) {
+                if (Objects.isNull(canalInstance)) {
                     try {
                         Thread.sleep(3000);
                     } catch (InterruptedException e) {
@@ -147,8 +174,10 @@ public class CanalMQStarter {
                     }
                     continue;
                 }
+
                 MQDestination canalDestination = new MQDestination();
                 canalDestination.setCanalDestination(destination);
+                // 读取当前canalInstance对应的【instance.properties】配置文件中的MQ配置信息
                 CanalMQConfig mqConfig = canalInstance.getMqConfig();
                 canalDestination.setTopic(mqConfig.getTopic());
                 canalDestination.setPartition(mqConfig.getPartition());
@@ -157,15 +186,19 @@ public class CanalMQStarter {
                 canalDestination.setPartitionHash(mqConfig.getPartitionHash());
                 canalDestination.setDynamicTopicPartitionNum(mqConfig.getDynamicTopicPartitionNum());
                 canalDestination.setEnableDynamicQueuePartition(mqConfig.getEnableDynamicQueuePartition());
-
+                // 执行下订阅，canalServer = CanalServerWithEmbedded，告知当前CanalMQRunnable需要从destination对应的到EventStore
+                // 中获取消息数据
                 canalServer.subscribe(clientIdentity);
                 logger.info("## the MQ producer: {} is running now ......", destination);
 
+                // 获取拉取超时时间
                 Integer getTimeout = mqProperties.getFetchTimeout();
+                // 获取批量大小
                 Integer getBatchSize = mqProperties.getBatchSize();
                 while (running && destinationRunning.get()) {
                     Message message;
                     if (getTimeout != null && getTimeout > 0) {
+                        // 超时时间不为空，根据batchSize大小和超时时间配置获取ClientIdentity订阅关系中的消息数据
                         message = canalServer.getWithoutAck(clientIdentity,
                             getBatchSize,
                             getTimeout.longValue(),
@@ -205,26 +238,6 @@ public class CanalMQStarter {
             } catch (Exception e) {
                 logger.error("process error!", e);
             }
-        }
-    }
-
-    private class CanalMQRunnable implements Runnable {
-
-        private String destination;
-
-        CanalMQRunnable(String destination){
-            this.destination = destination;
-        }
-
-        private AtomicBoolean running = new AtomicBoolean(true);
-
-        @Override
-        public void run() {
-            worker(destination, running);
-        }
-
-        public void stop() {
-            running.set(false);
         }
     }
 }

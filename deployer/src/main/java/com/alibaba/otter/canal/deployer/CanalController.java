@@ -44,15 +44,16 @@ import com.google.common.collect.MigrateMap;
  * @version 1.0.0
  */
 public class CanalController {
-
     private static final Logger                      logger   = LoggerFactory.getLogger(CanalController.class);
     private String                                   ip;
     private String                                   registerIp;
     private int                                      port;
     private int                                      adminPort;
-    // 默认使用spring的方式载入
+    // 默认使用spring的方式载入，实例名称与配置关系缓存Map
     private Map<String, InstanceConfig>              instanceConfigs;
+    // 全局实例配置信息
     private InstanceConfig                           globalInstanceConfig;
+    // 实例名称与对应的配置读取客户端管理类缓存map
     private Map<String, PlainCanalConfigClient>      managerClients;
     // 监听instance config的变化
     private boolean                                  autoScan = true;
@@ -60,10 +61,8 @@ public class CanalController {
     private Map<InstanceMode, InstanceConfigMonitor> instanceConfigMonitors;
     private CanalServerWithEmbedded                  embededCanalServer;
     private CanalServerWithNetty                     canalServer;
-
     private CanalInstanceGenerator                   instanceGenerator;
     private ZkClientx                                zkclientx;
-
     private CanalMQStarter                           canalMQStarter;
     private String                                   adminUser;
     private String                                   adminPasswd;
@@ -72,13 +71,17 @@ public class CanalController {
         this(System.getProperties());
     }
 
+    /**
+     * 调度控制器构造
+     * @param properties 本地和远程合并后的canal.properties配置
+     * */
     public CanalController(final Properties properties){
         managerClients = MigrateMap.makeComputingMap(this::getManagerClient);
-
-        // 初始化全局参数设置
+        // 1. 初始化全局参数设置
         globalInstanceConfig = initGlobalConfig(properties);
+        // 初始化实例名称与配置关系缓存Map
         instanceConfigs = new MapMaker().makeMap();
-        // 初始化instance config
+        // 2. 初始化instance config
         initInstanceConfig(properties);
 
         // init socketChannel
@@ -146,6 +149,7 @@ public class CanalController {
             runningMonitor.setDestination(destination);
             runningMonitor.setListener(new ServerRunningListener() {
 
+                @Override
                 public void processActiveEnter() {
                     try {
                         MDC.put(CanalConstants.MDC_DESTINATION, String.valueOf(destination));
@@ -158,6 +162,7 @@ public class CanalController {
                     }
                 }
 
+                @Override
                 public void processActiveExit() {
                     try {
                         MDC.put(CanalConstants.MDC_DESTINATION, String.valueOf(destination));
@@ -170,6 +175,7 @@ public class CanalController {
                     }
                 }
 
+                @Override
                 public void processStart() {
                     try {
                         if (zkclientx != null) {
@@ -178,10 +184,12 @@ public class CanalController {
                             initCid(path);
                             zkclientx.subscribeStateChanges(new IZkStateListener() {
 
+                                @Override
                                 public void handleStateChanged(KeeperState state) throws Exception {
 
                                 }
 
+                                @Override
                                 public void handleNewSession() throws Exception {
                                     initCid(path);
                                 }
@@ -197,6 +205,7 @@ public class CanalController {
                     }
                 }
 
+                @Override
                 public void processStop() {
                     try {
                         MDC.put(CanalConstants.MDC_DESTINATION, String.valueOf(destination));
@@ -224,6 +233,7 @@ public class CanalController {
         if (autoScan) {
             defaultAction = new InstanceAction() {
 
+                @Override
                 public void start(String destination) {
                     InstanceConfig config = instanceConfigs.get(destination);
                     if (config == null) {
@@ -243,6 +253,7 @@ public class CanalController {
                     logger.info("auto notify start {} successful.", destination);
                 }
 
+                @Override
                 public void stop(String destination) {
                     // 此处的stop，代表强制退出，非HA机制，所以需要退出HA的monitor和配置信息
                     InstanceConfig config = instanceConfigs.remove(destination);
@@ -257,6 +268,7 @@ public class CanalController {
                     logger.info("auto notify stop {} successful.", destination);
                 }
 
+                @Override
                 public void reload(String destination) {
                     // 目前任何配置变化，直接重启，简单处理
                     stop(destination);
@@ -298,7 +310,6 @@ public class CanalController {
                 int scanInterval = Integer.valueOf(getProperty(properties,
                     CanalConstants.CANAL_AUTO_SCAN_INTERVAL,
                     "5"));
-
                 if (mode.isSpring()) {
                     SpringInstanceConfigMonitor monitor = new SpringInstanceConfigMonitor();
                     monitor.setScanIntervalInSecond(scanInterval);
@@ -330,9 +341,15 @@ public class CanalController {
         }
     }
 
+    /**
+     * 根据配置属性对象properties初始化全局实例配置对象InstanceConfig
+     * @param properties 合并了本地和远程的canal.properties总配置属性
+     * */
     private InstanceConfig initGlobalConfig(Properties properties) {
+        // 1. 读取canal.properties文件中【canal.admin.manager】相关配置
         String adminManagerAddress = getProperty(properties, CanalConstants.CANAL_ADMIN_MANAGER);
         InstanceConfig globalConfig = new InstanceConfig();
+        // 2. 读取canal.properties文件中【canal.instance.global.mode】相关配置, 最终modeStr = spring
         String modeStr = getProperty(properties, CanalConstants.getInstanceModeKey(CanalConstants.GLOBAL_NAME));
         if (StringUtils.isNotEmpty(adminManagerAddress)) {
             // 如果指定了manager地址,则强制适用manager
@@ -341,13 +358,15 @@ public class CanalController {
             globalConfig.setMode(InstanceMode.valueOf(StringUtils.upperCase(modeStr)));
         }
 
+        // 3. 读取canal.properties文件中【canal.instance.global.lazy】相关配置, 最终lazyStr= false
         String lazyStr = getProperty(properties, CanalConstants.getInstancLazyKey(CanalConstants.GLOBAL_NAME));
         if (StringUtils.isNotEmpty(lazyStr)) {
             globalConfig.setLazy(Boolean.valueOf(lazyStr));
         }
 
-        String managerAddress = getProperty(properties,
-            CanalConstants.getInstanceManagerAddressKey(CanalConstants.GLOBAL_NAME));
+        // 4. 读取canal.properties文件中【canal.instance.global.manager.address】相关配置, 最终managerAddress配置与【canal.admin.manager】
+        // 属性值一致
+        String managerAddress = getProperty(properties, CanalConstants.getInstanceManagerAddressKey(CanalConstants.GLOBAL_NAME));
         if (StringUtils.isNotEmpty(managerAddress)) {
             if (StringUtils.equals(managerAddress, "${canal.admin.manager}")) {
                 managerAddress = adminManagerAddress;
@@ -385,24 +404,25 @@ public class CanalController {
         return globalConfig;
     }
 
-    private PlainCanalConfigClient getManagerClient(String managerAddress) {
-        return new PlainCanalConfigClient(managerAddress, this.adminUser, this.adminPasswd, this.registerIp, adminPort);
-    }
 
+    /**
+     * 根据全局canal.properties配置初始化每个本地canal实例配置信息
+     * */
     private void initInstanceConfig(Properties properties) {
         String destinationStr = getProperty(properties, CanalConstants.CANAL_DESTINATIONS);
         String[] destinations = StringUtils.split(destinationStr, CanalConstants.CANAL_DESTINATION_SPLIT);
-
         for (String destination : destinations) {
             InstanceConfig config = parseInstanceConfig(properties, destination);
             InstanceConfig oldConfig = instanceConfigs.put(destination, config);
-
             if (oldConfig != null) {
                 logger.warn("destination:{} old config:{} has replace by new config:{}", destination, oldConfig, config);
             }
         }
     }
 
+    /**
+     * 解析配置信息
+     * */
     private InstanceConfig parseInstanceConfig(Properties properties, String destination) {
         String adminManagerAddress = getProperty(properties, CanalConstants.CANAL_ADMIN_MANAGER);
         InstanceConfig config = new InstanceConfig(globalInstanceConfig);
@@ -437,6 +457,10 @@ public class CanalController {
         return config;
     }
 
+    private PlainCanalConfigClient getManagerClient(String managerAddress) {
+        return new PlainCanalConfigClient(managerAddress, this.adminUser, this.adminPasswd, this.registerIp, adminPort);
+    }
+
     public static String getProperty(Properties properties, String key, String defaultValue) {
         String value = getProperty(properties, key);
         if (StringUtils.isEmpty(value)) {
@@ -469,10 +493,12 @@ public class CanalController {
         if (zkclientx != null) {
             this.zkclientx.subscribeStateChanges(new IZkStateListener() {
 
+                @Override
                 public void handleStateChanged(KeeperState state) throws Exception {
 
                 }
 
+                @Override
                 public void handleNewSession() throws Exception {
                     initCid(path);
                 }

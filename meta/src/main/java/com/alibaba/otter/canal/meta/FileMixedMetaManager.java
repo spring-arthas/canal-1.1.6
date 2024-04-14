@@ -29,7 +29,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.MigrateMap;
 
 /**
- * 基于文件刷新的metaManager实现
+ * 基于文件刷新的metaManager实现，即基于文件方式的混合元数据管理器
  * 
  * <pre>
  * 策略：
@@ -41,7 +41,6 @@ import com.google.common.collect.MigrateMap;
  * @version 1.0.4
  */
 public class FileMixedMetaManager extends MemoryMetaManager implements CanalMetaManager {
-
     private static final Logger      logger       = LoggerFactory.getLogger(FileMixedMetaManager.class);
     private static final Charset     charset      = StandardCharsets.UTF_8;
     private File                     dataDir;
@@ -54,6 +53,7 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
     private long                     period       = 1000;                                               // 单位ms
     private Set<ClientIdentity>      updateCursorTasks;
 
+    @Override
     public void start() {
         super.start();
         Assert.notNull(dataDir);
@@ -113,34 +113,36 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
             TimeUnit.MILLISECONDS);
     }
 
+    @Override
     public void stop() {
         flushDataToFile();// 刷新数据
-
         super.stop();
         executor.shutdownNow();
         destinations.clear();
         batches.clear();
     }
 
+    @Override
     public void subscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.subscribe(clientIdentity);
-
-        // 订阅信息频率发生比较低，不需要做定时merge处理
+        // 订阅信息频率发生比较低，不需要做定时merge处理，此处CanalMQRunnable应该是处理当前ClientIdentity对应的meta.dat文件处理
         executor.submit(() -> flushDataToFile(clientIdentity.getDestination()));
     }
 
+    @Override
     public void unsubscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.unsubscribe(clientIdentity);
-
         // 订阅信息频率发生比较低，不需要做定时merge处理
         executor.submit(() -> flushDataToFile(clientIdentity.getDestination()));
     }
 
+    @Override
     public void updateCursor(ClientIdentity clientIdentity, Position position) throws CanalMetaManagerException {
         updateCursorTasks.add(clientIdentity);// 添加到任务队列中进行触发
         super.updateCursor(clientIdentity, position);
     }
 
+    @Override
     public Position getCursor(ClientIdentity clientIdentity) throws CanalMetaManagerException {
         Position position = super.getCursor(clientIdentity);
         if (position == nullCursor) {

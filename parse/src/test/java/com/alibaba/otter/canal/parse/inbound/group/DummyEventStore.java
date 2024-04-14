@@ -52,6 +52,7 @@ public class DummyEventStore implements CanalEventStore<Event> {
         return null;
     }
 
+    @Override
     public boolean isStart() {
         return false;
     }

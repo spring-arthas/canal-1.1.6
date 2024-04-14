@@ -69,18 +69,21 @@ public class MixedMetaManager extends MemoryMetaManager implements CanalMetaMana
         batches.clear();
     }
 
+    @Override
     public void subscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.subscribe(clientIdentity);
 
         executor.submit(() -> zooKeeperMetaManager.subscribe(clientIdentity));
     }
 
+    @Override
     public void unsubscribe(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.unsubscribe(clientIdentity);
 
         executor.submit(() -> zooKeeperMetaManager.unsubscribe(clientIdentity));
     }
 
+    @Override
     public void updateCursor(final ClientIdentity clientIdentity, final Position position)
                                                                                           throws CanalMetaManagerException {
         super.updateCursor(clientIdentity, position);
@@ -99,6 +102,7 @@ public class MixedMetaManager extends MemoryMetaManager implements CanalMetaMana
         }
     }
 
+    @Override
     public Long addBatch(final ClientIdentity clientIdentity, final PositionRange positionRange)
                                                                                                 throws CanalMetaManagerException {
         final Long batchId = super.addBatch(clientIdentity, positionRange);
@@ -107,6 +111,7 @@ public class MixedMetaManager extends MemoryMetaManager implements CanalMetaMana
         return batchId;
     }
 
+    @Override
     public void addBatch(final ClientIdentity clientIdentity, final PositionRange positionRange, final Long batchId)
                                                                                                                     throws CanalMetaManagerException {
         super.addBatch(clientIdentity, positionRange, batchId);
@@ -114,6 +119,7 @@ public class MixedMetaManager extends MemoryMetaManager implements CanalMetaMana
         executor.submit(() -> zooKeeperMetaManager.addBatch(clientIdentity, positionRange, batchId));
     }
 
+    @Override
     public PositionRange removeBatch(final ClientIdentity clientIdentity, final Long batchId)
                                                                                              throws CanalMetaManagerException {
         PositionRange positionRange = super.removeBatch(clientIdentity, batchId);
@@ -125,6 +131,7 @@ public class MixedMetaManager extends MemoryMetaManager implements CanalMetaMana
         return positionRange;
     }
 
+    @Override
     public void clearAllBatchs(final ClientIdentity clientIdentity) throws CanalMetaManagerException {
         super.clearAllBatchs(clientIdentity);
 

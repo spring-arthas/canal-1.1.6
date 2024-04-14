@@ -35,14 +35,20 @@ public class PlainCanalConfigClient extends AbstractCanalLifeCycle implements Ca
     private int                  adminPort;
     private boolean              autoRegister;
     private String               autoCluster;
-    private String               name;
+    private String               adminRegisterName;
 
-    public PlainCanalConfigClient(String configURL, String user, String passwd, String localIp, int adminPort,
-                                  boolean autoRegister, String autoCluster, String name){
+    public PlainCanalConfigClient(String configURL,
+                                  String user,
+                                  String passwd,
+                                  String localIp,
+                                  int adminPort,
+                                  boolean autoRegister,
+                                  String autoCluster,
+                                  String adminRegisterName){
         this(configURL, user, passwd, localIp, adminPort);
         this.autoCluster = autoCluster;
         this.autoRegister = autoRegister;
-        this.name = name;
+        this.adminRegisterName = adminRegisterName;
     }
 
     public PlainCanalConfigClient(String configURL, String user, String passwd, String localIp, int adminPort){
@@ -73,7 +79,7 @@ public class PlainCanalConfigClient extends AbstractCanalLifeCycle implements Ca
             md5 = "";
         }
         String url = configURL + "/api/v1/config/server_polling?ip=" + localIp + "&port=" + adminPort + "&md5=" + md5
-                     + "&register=" + (autoRegister ? 1 : 0) + "&cluster=" + autoCluster + "&name=" + name;
+             + "&register=" + (autoRegister ? 1 : 0) + "&cluster=" + autoCluster + "&name=" + adminRegisterName;
         return queryConfig(url);
     }
 

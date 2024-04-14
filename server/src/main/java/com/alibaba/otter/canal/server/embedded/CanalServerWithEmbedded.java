@@ -165,18 +165,21 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
 
     /**
      * 客户端订阅，重复订阅时会更新对应的filter信息
+     * @param clientIdentity 客户端身份类
      */
     @Override
     public void subscribe(ClientIdentity clientIdentity) throws CanalServerException {
+        // 1. 检查该destination是否已经启动
         checkStart(clientIdentity.getDestination());
 
+        // 2. 获取destination对应的CanalInstance
         CanalInstance canalInstance = canalInstances.get(clientIdentity.getDestination());
         if (!canalInstance.getMetaManager().isStart()) {
             canalInstance.getMetaManager().start();
         }
 
         canalInstance.getMetaManager().subscribe(clientIdentity); // 执行一下meta订阅
-
+        // canalInstance.getMetaManager() = FileMixedMetaManager
         Position position = canalInstance.getMetaManager().getCursor(clientIdentity);
         if (position == null) {
             position = canalInstance.getEventStore().getFirstPosition();// 获取一下store中的第一条
@@ -190,6 +193,12 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
 
         // 通知下订阅关系变化
         canalInstance.subscribeChange(clientIdentity);
+    }
+
+    private void checkStart(String destination) {
+        if (!isStart(destination)) {
+            throw new CanalServerException(String.format("destination:%s should start first", destination));
+        }
     }
 
     /**
@@ -316,8 +325,9 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
      */
     @Override
     public Message getWithoutAck(ClientIdentity clientIdentity, int batchSize, Long timeout, TimeUnit unit)
-                                                                                                           throws CanalServerException {
+        throws CanalServerException {
         checkStart(clientIdentity.getDestination());
+        // 检查订阅关系是否变化
         checkSubscribe(clientIdentity);
 
         CanalInstance canalInstance = canalInstances.get(clientIdentity.getDestination());
@@ -502,8 +512,7 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
     /**
      * 根据不同的参数，选择不同的方式获取数据
      */
-    private Events<Event> getEvents(CanalEventStore eventStore, Position start, int batchSize, Long timeout,
-                                    TimeUnit unit) {
+    private Events<Event> getEvents(CanalEventStore eventStore, Position start, int batchSize, Long timeout, TimeUnit unit) {
         if (timeout == null) {
             return eventStore.tryGet(start, batchSize);
         } else {
@@ -525,12 +534,6 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
         if (!hasSubscribe) {
             throw new CanalServerException(String.format("ClientIdentity:%s should subscribe first",
                 clientIdentity.toString()));
-        }
-    }
-
-    private void checkStart(String destination) {
-        if (!isStart(destination)) {
-            throw new CanalServerException(String.format("destination:%s should start first", destination));
         }
     }
 
