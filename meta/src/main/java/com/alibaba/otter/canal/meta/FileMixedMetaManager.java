@@ -64,16 +64,13 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
                 throw new CanalMetaManagerException(e);
             }
         }
-
         if (!dataDir.canRead() || !dataDir.canWrite()) {
             throw new CanalMetaManagerException("dir[" + dataDir.getPath() + "] can not read/write");
         }
 
         dataFileCaches = MigrateMap.makeComputingMap(this::getDataFile);
-
         executor = Executors.newScheduledThreadPool(1);
         destinations = MigrateMap.makeComputingMap(this::loadClientIdentity);
-
         cursors = MigrateMap.makeComputingMap(clientIdentity -> {
             Position position = loadCursor(clientIdentity.getDestination(), clientIdentity);
             if (position == null) {
@@ -85,7 +82,7 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
 
         updateCursorTasks = Collections.synchronizedSet(new HashSet<>());
 
-        // 启动定时工作任务
+        // 启动定时工作任务，将完成解析的binlog位点+文件名等元数据信息写入meta.dat文件，每个destination对应的ClientIdentity都会处理
         executor.scheduleAtFixedRate(() -> {
             List<ClientIdentity> tasks = new ArrayList<>(updateCursorTasks);
             for (ClientIdentity clientIdentity : tasks) {
@@ -97,9 +94,9 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
                     if (logger.isInfoEnabled()) {
                         LogPosition cursor = (LogPosition) getCursor(clientIdentity);
                         logger.info("clientId:{} cursor:[{},{},{},{},{}] address[{}]", clientIdentity.getClientId(), cursor.getPostion().getJournalName(),
-                                cursor.getPostion().getPosition(), cursor.getPostion().getTimestamp(),
-                                cursor.getPostion().getServerId(), cursor.getPostion().getGtid(),
-                                cursor.getIdentity().getSourceAddress().toString());
+                            cursor.getPostion().getPosition(), cursor.getPostion().getTimestamp(),
+                            cursor.getPostion().getServerId(), cursor.getPostion().getGtid(),
+                            cursor.getIdentity().getSourceAddress().toString());
                     }
                     flushDataToFile(clientIdentity.getDestination());
                 } catch (Throwable e) {
@@ -153,6 +150,29 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
     }
 
     // ============================ helper method ======================
+
+    /**
+     * 根据destination和对应的ClientIdentity获取对应的游标元数据
+     * */
+    private Position loadCursor(String destination, ClientIdentity clientIdentity) {
+        FileMetaInstanceData data = loadDataFromFile(dataFileCaches.get(destination));
+        if (data == null) {
+            return null;
+        }
+
+        List<FileMetaClientIdentityData> clientDatas = data.getClientDatas();
+        if (clientDatas == null) {
+            return null;
+        }
+
+        for (FileMetaClientIdentityData clientData : clientDatas) {
+            if (clientData.getClientIdentity() != null && clientData.getClientIdentity().equals(clientIdentity)) {
+                return clientData.getCursor();
+            }
+        }
+
+        return null;
+    }
 
     private File getDataFile(String destination) {
         File destinationMetaDir = new File(dataDir, destination);
@@ -243,34 +263,12 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
         return result;
     }
 
-    private Position loadCursor(String destination, ClientIdentity clientIdentity) {
-        FileMetaInstanceData data = loadDataFromFile(dataFileCaches.get(destination));
-        if (data == null) {
-            return null;
-        }
-
-        List<FileMetaClientIdentityData> clientDatas = data.getClientDatas();
-        if (clientDatas == null) {
-            return null;
-        }
-
-        for (FileMetaClientIdentityData clientData : clientDatas) {
-            if (clientData.getClientIdentity() != null && clientData.getClientIdentity().equals(clientIdentity)) {
-                return clientData.getCursor();
-            }
-        }
-
-        return null;
-    }
-
     /**
      * 描述一个clientIdentity对应的数据对象
-     * 
      * @author jianghang 2013-4-15 下午06:19:40
      * @version 1.0.4
      */
     public static class FileMetaClientIdentityData {
-
         private ClientIdentity clientIdentity;
         private LogPosition    cursor;
 
@@ -309,14 +307,11 @@ public class FileMixedMetaManager extends MemoryMetaManager implements CanalMeta
      * @version 1.0.4
      */
     public static class FileMetaInstanceData {
-
         private String                           destination;
         private List<FileMetaClientIdentityData> clientDatas;
-
         public FileMetaInstanceData(){
 
         }
-
         public FileMetaInstanceData(String destination, List<FileMetaClientIdentityData> clientDatas){
             this.destination = destination;
             this.clientDatas = clientDatas;

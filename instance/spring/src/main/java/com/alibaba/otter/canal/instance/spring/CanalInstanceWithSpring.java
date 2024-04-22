@@ -16,8 +16,8 @@ import com.alibaba.otter.canal.store.CanalEventStore;
 import com.alibaba.otter.canal.store.model.Event;
 
 /**
- * 基于spring容器启动canal实例，方便独立于manager启动
- * 
+ * 基于spring容器启动canal实例，方便独立于manager启动，该Bean的构建来源与【file-instance.xml】文件中的【instance】标签配置的bean
+ * 其实该类并不提供启动能力，只是收集数据
  * @author jianghang 2012-7-12 下午01:21:26
  * @author zebin.xuzb
  * @version 1.0.0
@@ -27,7 +27,7 @@ public class CanalInstanceWithSpring extends AbstractCanalInstance {
     private static final Logger logger = LoggerFactory.getLogger(CanalInstanceWithSpring.class);
 
     public void start() {
-        logger.info("start CannalInstance for {}-{} ", new Object[] { 1, destination });
+        logger.info("【deployer】CanalInstanceWithSpring 开始启动实例【{}】相关组件", destination);
         super.start();
     }
 

@@ -40,8 +40,6 @@ public class AbstractCanalInstance extends AbstractCanalLifeCycle implements Can
     protected CanalAlarmHandler                      alarmHandler;                                                 // alarm报警机制
     protected CanalMQConfig                          mqConfig;                                                     // mq的配置
 
-
-
     @Override
     public boolean subscribeChange(ClientIdentity identity) {
         if (StringUtils.isNotEmpty(identity.getFilter())) {
@@ -75,28 +73,30 @@ public class AbstractCanalInstance extends AbstractCanalLifeCycle implements Can
     @Override
     public void start() {
         super.start();
+        // metaManager = FileMixedMetaManager  解析元数据管理对象，需要重点关注
         if (!metaManager.isStart()) {
             metaManager.start();
         }
-
+        // alarmHandler = LogAlarmHandler
         if (!alarmHandler.isStart()) {
             alarmHandler.start();
         }
-
+        // eventStore = MemoryEventStoreWithBuffer  binlog解析后的数据存储介质
         if (!eventStore.isStart()) {
             eventStore.start();
         }
-
+        // eventSink = EntryEventSink  binlog解析后的数据传送组件
         if (!eventSink.isStart()) {
             eventSink.start();
         }
-
+        // eventParser = RdsBinlogEventParserProxy   binlog解析对象
         if (!eventParser.isStart()) {
             beforeStartEventParser(eventParser);
             eventParser.start();
             afterStartEventParser(eventParser);
         }
-        logger.info("start successful....");
+
+        logger.info("【deployer】启动实例【{}】成功，开始监听binlog", destination);
     }
 
     @Override
@@ -130,7 +130,6 @@ public class AbstractCanalInstance extends AbstractCanalLifeCycle implements Can
     }
 
     protected void beforeStartEventParser(CanalEventParser eventParser) {
-
         boolean isGroup = (eventParser instanceof GroupEventParser);
         if (isGroup) {
             // 处理group的模式

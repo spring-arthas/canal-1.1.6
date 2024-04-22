@@ -51,8 +51,8 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
     private int                  receiveBufferSize                 = 64 * 1024;
     private int                  sendBufferSize                    = 64 * 1024;
     // 数据库信息
-    protected AuthenticationInfo masterInfo;                                   // 主库
-    protected AuthenticationInfo standbyInfo;                                  // 备库
+    protected AuthenticationInfo masterInfo;                                   // 主库信息
+    protected AuthenticationInfo standbyInfo;                                  // 备库信息
     // binlog信息
     protected EntryPosition      masterPosition;
     protected EntryPosition      standbyPosition;
@@ -72,6 +72,9 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
     private boolean              autoResetLatestPosMode            = false;    // true:
                                                                                 // binlog被删除之后，自动按最新的数据订阅
 
+    /**
+     * 根据【instance.propoerties】主库配置信息构建MysqlConnection对象
+     * */
     protected ErosaConnection buildErosaConnection() {
         return buildMysqlConnection(this.runningInfo);
     }
@@ -84,11 +87,13 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
         if (binlogParser != null && binlogParser instanceof LogEventConvert) {
             metaConnection = (MysqlConnection) connection.fork();
             try {
+                // fork出一个连接对象进行三次握手连接
                 metaConnection.connect();
             } catch (IOException e) {
                 throw new CanalParseException(e);
             }
 
+            // 处理binlog模式 ROW或STATEMENT或MIXED
             if (supportBinlogFormats != null && supportBinlogFormats.length > 0) {
                 BinlogFormat format = ((MysqlConnection) metaConnection).getBinlogFormat();
                 boolean found = false;
@@ -103,7 +108,6 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
                     throw new CanalParseException("Unsupported BinlogFormat " + format);
                 }
             }
-
             if (supportBinlogImages != null && supportBinlogImages.length > 0) {
                 BinlogImage image = ((MysqlConnection) metaConnection).getBinlogImage();
                 boolean found = false;
@@ -118,7 +122,6 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
                     throw new CanalParseException("Unsupported BinlogImage " + image);
                 }
             }
-
             if (tableMetaTSDB != null && tableMetaTSDB instanceof DatabaseTableMeta) {
                 ((DatabaseTableMeta) tableMetaTSDB).setConnection(metaConnection);
                 ((DatabaseTableMeta) tableMetaTSDB).setFilter(eventFilter);
@@ -127,7 +130,6 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
                 ((DatabaseTableMeta) tableMetaTSDB).setSnapshotExpire(tsdbSnapshotExpire);
                 ((DatabaseTableMeta) tableMetaTSDB).init(destination);
             }
-
             tableMetaCache = new TableMetaCache(metaConnection, tableMetaTSDB);
             ((LogEventConvert) binlogParser).setTableMetaCache(tableMetaCache);
         }
@@ -539,7 +541,7 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
     // 根据想要的position，可能这个position对应的记录为rowdata，需要找到事务头，避免丢数据
     // 主要考虑一个事务执行时间可能会几秒种，如果仅仅按照timestamp相同，则可能会丢失事务的前半部分数据
     private Long findTransactionBeginPosition(ErosaConnection mysqlConnection, final EntryPosition entryPosition)
-                                                                                                                 throws IOException {
+        throws IOException {
         // 针对开始的第一条为非Begin记录，需要从该binlog扫描
         final java.util.concurrent.atomic.AtomicLong preTransactionStartPosition = new java.util.concurrent.atomic.AtomicLong(0L);
         mysqlConnection.reconnect();

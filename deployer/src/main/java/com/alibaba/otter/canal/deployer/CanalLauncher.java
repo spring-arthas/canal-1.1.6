@@ -20,12 +20,10 @@ import com.alibaba.otter.canal.instance.manager.plain.PlainCanalConfigClient;
 
 /**
  * canal独立版本启动的入口类  canal-deployer启动类
- *
  * @author jianghang 2012-11-6 下午05:20:49
  * @version 1.0.0
  */
 public class CanalLauncher {
-
     private static final String             CLASSPATH_URL_PREFIX = "classpath:";
     private static final Logger             logger               = LoggerFactory.getLogger(CanalLauncher.class);
     public static final CountDownLatch      runningLatch         = new CountDownLatch(1);
@@ -111,9 +109,9 @@ public class CanalLauncher {
         if (Objects.isNull(canalConfig)) {
             throw new IllegalArgumentException("managerAddress:" + managerAddress + " can't not found config for [" + registerIp + ":" + adminPort + "]");
         }
-        // 获取从canal-admin平台读取到配置
+        // 获取从canal-admin平台读取到主配置
         Properties managerProperties = canalConfig.getProperties();
-        // 合并本地【canal.properties】本地的配置
+        // 合并本地【canal.properties】的主配置，不过会以本地的主配置为主
         managerProperties.putAll(properties);
         // 如果配置的【canal.auto.scan.interval】配置自动扫描间隔参数不为空，则开启异步线程自动进行配置变更，默认为5s
         int scanIntervalInSecond = Integer.valueOf(CanalController.getProperty(managerProperties, CanalConstants.CANAL_AUTO_SCAN_INTERVAL, "5"));
@@ -126,14 +124,15 @@ public class CanalLauncher {
             public void run() {
                 try {
                     if (Objects.isNull(lastCanalConfig)) {
+                        // 上次未向 canal-admin 发生拉取配置请求，则尝试拉取一次，作为最新的一次拉取配置
                         lastCanalConfig = configClient.findServer(null);
                     } else {
+                        // 远程拉取最新的主配置，传递上次拉取请求后的md5参数，如果主配置没有任何变化，那么查询的结果为null，说明主配置没有
+                        // 发生任何变化
                         PlainCanal newCanalConfig = configClient.findServer(lastCanalConfig.getMd5());
                         if (Objects.nonNull(newCanalConfig)) {
-                            // 远程配置canal.properties修改重新加载整个应用
                             canalStarter.stop();
                             Properties managerProperties = newCanalConfig.getProperties();
-                            // merge local
                             managerProperties.putAll(properties);
                             canalStarter.setProperties(managerProperties);
                             // 配置变化重启所有实例信息

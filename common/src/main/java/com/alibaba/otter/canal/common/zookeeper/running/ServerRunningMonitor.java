@@ -27,7 +27,6 @@ import com.alibaba.otter.canal.common.zookeeper.ZookeeperPathUtils;
  * @version 1.0.0
  */
 public class ServerRunningMonitor extends AbstractCanalLifeCycle {
-
     private static final Logger        logger       = LoggerFactory.getLogger(ServerRunningMonitor.class);
     private ZkClientx                  zkClient;
     private String                     destination;
@@ -50,7 +49,6 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
     public ServerRunningMonitor(){
         // 创建父节点
         dataListener = new IZkDataListener() {
-
             public void handleDataChange(String dataPath, Object data) throws Exception {
                 MDC.put("destination", destination);
                 ServerRunningData runningData = JsonUtils.unmarshalFromByte((byte[]) data, ServerRunningData.class);
@@ -64,7 +62,6 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
 
                 activeData = (ServerRunningData) runningData;
             }
-
             public void handleDataDeleted(String dataPath) throws Exception {
                 MDC.put("destination", destination);
                 mutex.set(false);
@@ -76,9 +73,7 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
                     delayExector.schedule(() -> initRunning(), delayTime, TimeUnit.SECONDS);
                 }
             }
-
         };
-
     }
 
     public void init() {
@@ -88,12 +83,14 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
     public synchronized void start() {
         super.start();
         try {
+            // 没有构建过destination对应的zk节点，则优先完成节点注册
             processStart();
             if (zkClient != null) {
                 // 如果需要尽可能释放instance资源，不需要监听running节点，不然即使stop了这台机器，另一台机器立马会start
                 String path = ZookeeperPathUtils.getDestinationServerRunning(destination);
                 zkClient.subscribeDataChanges(path, dataListener);
 
+                // 初始化运行
                 initRunning();
             } else {
                 processActiveEnter();// 没有zk，直接启动
@@ -104,6 +101,36 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
             stop();
         }
 
+    }
+
+    private void initRunning() {
+        if (!isStart()) {
+            return;
+        }
+
+        String path = ZookeeperPathUtils.getDestinationServerRunning(destination);
+        // 序列化
+        byte[] bytes = JsonUtils.marshalToByte(serverData);
+        try {
+            mutex.set(false);
+            zkClient.create(path, bytes, CreateMode.EPHEMERAL);
+            activeData = serverData;
+            // 触发一下事件，即开始进行实例启动，最终调用到CanalController构造方法中的【ServerRunningMonitors.setRunningMonitors】
+            // 属性中
+            processActiveEnter();
+            mutex.set(true);
+            release = false;
+        } catch (ZkNodeExistsException e) {
+            bytes = zkClient.readData(path, true);
+            if (bytes == null) {// 如果不存在节点，立即尝试一次
+                initRunning();
+            } else {
+                activeData = JsonUtils.unmarshalFromByte(bytes, ServerRunningData.class);
+            }
+        } catch (ZkNoNodeException e) {
+            zkClient.createPersistent(ZookeeperPathUtils.getDestinationPath(destination), true); // 尝试创建父节点
+            initRunning();
+        }
     }
 
     public boolean release() {
@@ -130,37 +157,8 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
         processStop();
     }
 
-    private void initRunning() {
-        if (!isStart()) {
-            return;
-        }
-
-        String path = ZookeeperPathUtils.getDestinationServerRunning(destination);
-        // 序列化
-        byte[] bytes = JsonUtils.marshalToByte(serverData);
-        try {
-            mutex.set(false);
-            zkClient.create(path, bytes, CreateMode.EPHEMERAL);
-            activeData = serverData;
-            processActiveEnter();// 触发一下事件
-            mutex.set(true);
-            release = false;
-        } catch (ZkNodeExistsException e) {
-            bytes = zkClient.readData(path, true);
-            if (bytes == null) {// 如果不存在节点，立即尝试一次
-                initRunning();
-            } else {
-                activeData = JsonUtils.unmarshalFromByte(bytes, ServerRunningData.class);
-            }
-        } catch (ZkNoNodeException e) {
-            zkClient.createPersistent(ZookeeperPathUtils.getDestinationPath(destination), true); // 尝试创建父节点
-            initRunning();
-        }
-    }
-
     /**
      * 阻塞等待自己成为active，如果自己成为active，立马返回
-     * 
      * @throws InterruptedException
      */
     public void waitForActive() throws InterruptedException {

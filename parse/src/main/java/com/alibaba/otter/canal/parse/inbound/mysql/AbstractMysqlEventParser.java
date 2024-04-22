@@ -28,7 +28,6 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
     protected int                  tsdbSnapshotExpire        = 360;
     protected String               tsdbSpringXml;
     protected TableMetaTSDB        tableMetaTSDB;
-
     // 编码信息
     protected byte                 connectionCharsetNumber   = (byte) 33;
     protected Charset              connectionCharset         = Charset.forName("UTF-8");
@@ -38,7 +37,6 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
     protected boolean              filterRows                = false;
     protected boolean              filterTableError          = false;
     protected boolean              useDruidDdlFilter         = true;
-
     protected boolean              filterDmlInsert           = false;
     protected boolean              filterDmlUpdate           = false;
     protected boolean              filterDmlDelete           = false;
@@ -68,6 +66,20 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
         convert.setUseDruidDdlFilter(useDruidDdlFilter);
         return convert;
     }
+
+    protected MultiStageCoprocessor buildMultiStageCoprocessor() {
+        MysqlMultiStageCoprocessor mysqlMultiStageCoprocessor = new MysqlMultiStageCoprocessor(parallelBufferSize,
+            parallelThreadSize,
+            (LogEventConvert) binlogParser,
+            transactionBuffer,
+            destination,
+            filterDmlInsert,
+            filterDmlUpdate,
+            filterDmlDelete);
+        mysqlMultiStageCoprocessor.setEventsPublishBlockingTime(eventsPublishBlockingTime);
+        return mysqlMultiStageCoprocessor;
+    }
+
 
     public void setEventFilter(CanalEventFilter eventFilter) {
         super.setEventFilter(eventFilter);
@@ -171,16 +183,6 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
         }
 
         super.stop();
-    }
-
-    protected MultiStageCoprocessor buildMultiStageCoprocessor() {
-        MysqlMultiStageCoprocessor mysqlMultiStageCoprocessor = new MysqlMultiStageCoprocessor(parallelBufferSize,
-            parallelThreadSize,
-            (LogEventConvert) binlogParser,
-            transactionBuffer,
-            destination, filterDmlInsert, filterDmlUpdate, filterDmlDelete);
-        mysqlMultiStageCoprocessor.setEventsPublishBlockingTime(eventsPublishBlockingTime);
-        return mysqlMultiStageCoprocessor;
     }
 
     // ============================ setter / getter =========================

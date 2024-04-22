@@ -1,5 +1,6 @@
 package com.alibaba.otter.canal.parse.inbound.mysql;
 
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -39,7 +40,7 @@ import com.taobao.tddl.dbsync.binlog.event.UpdateRowsLogEvent;
 import com.taobao.tddl.dbsync.binlog.event.WriteRowsLogEvent;
 
 /**
- * 针对解析器提供一个多阶段协同的处理
+ * 针对解析器提供一个多阶段协同的处理，
  * 
  * <pre>
  * 1. 网络接收 (单线程)
@@ -57,7 +58,6 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     private LogEventConvert                   logEventConvert;
     private EventTransactionBuffer            transactionBuffer;
     private ErosaConnection                   connection;
-
     private int                               parserThreadCount;
     private int                               ringBufferSize;
     private RingBuffer<MessageEvent>          disruptorMsgBuffer;
@@ -75,9 +75,14 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     protected boolean                         filterDmlUpdate = false;
     protected boolean                         filterDmlDelete = false;
 
-    public MysqlMultiStageCoprocessor(int ringBufferSize, int parserThreadCount, LogEventConvert logEventConvert,
-                                      EventTransactionBuffer transactionBuffer, String destination,
-                                      boolean filterDmlInsert, boolean filterDmlUpdate, boolean filterDmlDelete){
+    public MysqlMultiStageCoprocessor(int ringBufferSize,
+                                      int parserThreadCount,
+                                      LogEventConvert logEventConvert,
+                                      EventTransactionBuffer transactionBuffer,
+                                      String destination,
+                                      boolean filterDmlInsert,
+                                      boolean filterDmlUpdate,
+                                      boolean filterDmlDelete){
         this.ringBufferSize = ringBufferSize;
         this.parserThreadCount = parserThreadCount;
         this.logEventConvert = logEventConvert;
@@ -98,16 +103,13 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         int tc = parserThreadCount > 0 ? parserThreadCount : 1;
         this.parserExecutor = Executors.newFixedThreadPool(tc, new NamedThreadFactory("MultiStageCoprocessor-Parser-"
                                                                                       + destination));
-
         this.stageExecutor = Executors.newFixedThreadPool(2, new NamedThreadFactory("MultiStageCoprocessor-other-"
                                                                                     + destination));
         SequenceBarrier sequenceBarrier = disruptorMsgBuffer.newBarrier();
         ExceptionHandler exceptionHandler = new SimpleFatalExceptionHandler();
         // stage 2
         this.logContext = new LogContext();
-        simpleParserStage = new BatchEventProcessor<>(disruptorMsgBuffer,
-            sequenceBarrier,
-            new SimpleParserStage(logContext));
+        simpleParserStage = new BatchEventProcessor<>(disruptorMsgBuffer, sequenceBarrier, new SimpleParserStage(logContext));
         simpleParserStage.setExceptionHandler(exceptionHandler);
         disruptorMsgBuffer.addGatingSequences(simpleParserStage.getSequence());
 
@@ -187,6 +189,9 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         return this.publish(null, event);
     }
 
+    /**
+     * 向disruptor投递LogBuffer，开始进入解析处理
+     * */
     private boolean publish(LogBuffer buffer, LogEvent event) {
         if (!isStart()) {
             if (exception != null) {
@@ -198,6 +203,8 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         boolean interupted = false;
         long blockingStart = 0L;
         int fullTimes = 0;
+
+        // do-while循环向disruptor的生产者发布当前logBuffer，直到发布成功break
         do {
             /**
              * 由于改为processor仅终止自身stage而不是stop，那么需要由incident标识coprocessor是否正常工作。
@@ -207,13 +214,16 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                 throw exception;
             }
             try {
+                // 获取一个当前LogBuffer在disruptor中的坑位索引
                 long next = disruptorMsgBuffer.tryNext();
+                // 提取坑位缓存好用于放置LogBuffer数据的MessageEvent对象
                 MessageEvent data = disruptorMsgBuffer.get(next);
-                if (buffer != null) {
+                if (Objects.nonNull(buffer)) {
                     data.setBuffer(buffer);
                 } else {
                     data.setEvent(event);
                 }
+                // 坑位缓存数据设置成功后，向disruptor发送该位置数据，即变为可消费状态
                 disruptorMsgBuffer.publish(next);
                 if (fullTimes > 0) {
                     eventsPublishBlockingTime.addAndGet(System.nanoTime() - blockingStart);
@@ -248,11 +258,12 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
 
     }
 
+    /**
+     * 一阶段简单解析
+     * */
     private class SimpleParserStage implements EventHandler<MessageEvent>, LifecycleAware {
-
         private LogDecoder decoder;
         private LogContext context;
-
         public SimpleParserStage(LogContext context){
             decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
             this.context = context;
@@ -263,19 +274,23 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
 
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
             try {
+                // 解析LogBuffer为LogEvent并设置进MessageEvent中供后续处理阶段处理数据
                 LogEvent logEvent = event.getEvent();
                 if (logEvent == null) {
                     LogBuffer buffer = event.getBuffer();
+                    // 解码LogBuffer为LogEvent对象
                     logEvent = decoder.decode(buffer, context);
                     event.setEvent(logEvent);
                 }
 
+                // 根据binlog解析后的Mysql事件类型进行预解析
                 int eventType = logEvent.getHeader().getType();
                 TableMeta tableMeta = null;
                 boolean needDmlParse = false;
                 switch (eventType) {
                     case LogEvent.WRITE_ROWS_EVENT_V1:
                     case LogEvent.WRITE_ROWS_EVENT:
+                        // 来自instance.properties【canal.instance.filter.dml.insert】配置
                         if (!filterDmlInsert) {
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((WriteRowsLogEvent) logEvent);
                             needDmlParse = true;
@@ -284,6 +299,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                     case LogEvent.UPDATE_ROWS_EVENT_V1:
                     case LogEvent.PARTIAL_UPDATE_ROWS_EVENT:
                     case LogEvent.UPDATE_ROWS_EVENT:
+                        // 来自instance.properties【canal.instance.filter.dml.update】配置
                         if (!filterDmlUpdate) {
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((UpdateRowsLogEvent) logEvent);
                             needDmlParse = true;
@@ -291,6 +307,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                         break;
                     case LogEvent.DELETE_ROWS_EVENT_V1:
                     case LogEvent.DELETE_ROWS_EVENT:
+                        // 来自instance.properties【canal.instance.filter.dml.delete】配置
                         if (!filterDmlDelete) {
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((DeleteRowsLogEvent) logEvent);
                             needDmlParse = true;
@@ -302,6 +319,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                     default:
                         CanalEntry.Entry entry = logEventConvert.parse(event.getEvent(), false);
                         event.setEntry(entry);
+                        break;
                 }
 
                 // 记录一下DML的表结构
@@ -398,8 +416,10 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         }
     }
 
+    /**
+     * disruptor环形队列数组中的缓存对象
+     * */
     static class MessageEvent {
-
         private LogBuffer        buffer;
         private CanalEntry.Entry entry;
         private boolean          needDmlParse = false;

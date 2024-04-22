@@ -10,14 +10,13 @@ import java.util.BitSet;
 
 /**
  * TODO: Document Me!!
- * 
+ *  binlog数据缓存对象，存入的是binlog字节数据
  * @author <a href="mailto:changyuan.lh@taobao.com">Changyuan.lh</a>
  * @version 1.0
  */
 public class LogBuffer {
-
+    // binlog字节数据内容数组
     protected byte[] buffer;
-
     protected int    origin, limit;
     protected int    position;
     protected int    semival;

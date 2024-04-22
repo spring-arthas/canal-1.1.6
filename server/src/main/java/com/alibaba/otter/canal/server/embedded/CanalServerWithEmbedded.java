@@ -57,14 +57,11 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
     private String                     passwd;
 
     private static class SingletonHolder {
-
         private static final CanalServerWithEmbedded CANAL_SERVER_WITH_EMBEDDED = new CanalServerWithEmbedded();
     }
-
     public CanalServerWithEmbedded(){
         // 希望也保留用户new单独实例的需求,兼容历史
     }
-
     public static CanalServerWithEmbedded instance() {
         return SingletonHolder.CANAL_SERVER_WITH_EMBEDDED;
     }
@@ -76,8 +73,9 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
             loadCanalMetrics();
             metrics.setServerPort(metricsPort);
             metrics.initialize();
-            canalInstances = MigrateMap.makeComputingMap(destination -> canalInstanceGenerator.generate(destination));
 
+            // 构建destination实例生成
+            canalInstances = MigrateMap.makeComputingMap(destination -> canalInstanceGenerator.generate(destination));
             // lastRollbackPostions = new MapMaker().makeMap();
         }
     }
@@ -125,6 +123,9 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
         return false;
     }
 
+    /**
+     * 启动destination对应的实例信息
+     * */
     public void start(final String destination) {
         final CanalInstance canalInstance = canalInstances.get(destination);
         if (!canalInstance.isStart()) {
@@ -133,8 +134,9 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
                 if (metrics.isRunning()) {
                     metrics.register(canalInstance);
                 }
+
+                // 启动该实例，canalInstance = CanalInstanceWithSpring -> AbstractCanalInstance
                 canalInstance.start();
-                logger.info("start CanalInstances[{}] successfully", destination);
             } finally {
                 MDC.remove("destination");
             }
@@ -247,7 +249,7 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
      */
     @Override
     public Message get(ClientIdentity clientIdentity, int batchSize, Long timeout, TimeUnit unit)
-                                                                                                 throws CanalServerException {
+        throws CanalServerException {
         checkStart(clientIdentity.getDestination());
         checkSubscribe(clientIdentity);
         CanalInstance canalInstance = canalInstances.get(clientIdentity.getDestination());

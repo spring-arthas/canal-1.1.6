@@ -224,20 +224,33 @@ public class MysqlConnection implements ErosaConnection {
         throw new NullPointerException("Not implement yet");
     }
 
+    /**
+     * 基于指定的binlog文件名+位点信息+多阶段协同处理器方式的dump数据
+     * @param binlogfilename binlog文件名
+     * @param binlogPosition 当前【binlogFilename】对应的位点信息对象
+     * @param coprocessor 多阶段协同处理器，主要是对fetch下来的buffer数据交由该coprocessor进行多阶段解析处理
+     * */
     @Override
     public void dump(String binlogfilename, Long binlogPosition, MultiStageCoprocessor coprocessor) throws IOException {
         updateSettings();
+        // 获取校验和
         loadBinlogChecksum();
+        // 注册为一个从服务
         sendRegisterSlave();
+        // 向mysql发送作为slave节点的dump binlog请求
         sendBinlogDump(binlogfilename, binlogPosition);
         ((MysqlMultiStageCoprocessor) coprocessor).setConnection(this);
         ((MysqlMultiStageCoprocessor) coprocessor).setBinlogChecksum(binlogChecksum);
         try (DirectLogFetcher fetcher = new DirectLogFetcher(connector.getReceiveBufferSize())) {
             fetcher.start(connector.getChannel());
             while (fetcher.fetch()) {
+                // 计算接收到的binlog数据字节大小
                 accumulateReceivedBytes(fetcher.limit());
+                // 复制出binlog 字节数据
                 LogBuffer buffer = fetcher.duplicate();
+                // fetch更新本次拉取的字节大小位点，表示已消费到
                 fetcher.consume(fetcher.limit());
+                // 向多阶段协同解析器发布本次拉取的buffer数据，开始进行disruptor消费
                 if (!coprocessor.publish(buffer)) {
                     break;
                 }
@@ -524,7 +537,9 @@ public class MysqlConnection implements ErosaConnection {
 
     /**
      * 获取主库checksum信息
-     * 
+     *   1. 数据完整性保护： 通过校验和验证，可以检测到数据在传输过程中是否发生了损坏或篡改，从而保护数据的完整性。
+     *   2. 提高可靠性： 启用校验和功能可以提高 MySQL 复制的可靠性，减少数据传输过程中出现的错误或数据不一致的可能性。
+     *   3. 减少错误排查时间： 如果出现数据传输错误，校验和功能可以帮助管理员快速识别问题所在，减少故障排查的时间。
      * <pre>
      * mariadb区别于mysql会在binlog的第一个事件Rotate_Event里也会采用checksum逻辑,而mysql是在第二个binlog事件之后才感知是否需要处理checksum
      * 导致maraidb只要是开启checksum就会出现binlog文件名解析乱码

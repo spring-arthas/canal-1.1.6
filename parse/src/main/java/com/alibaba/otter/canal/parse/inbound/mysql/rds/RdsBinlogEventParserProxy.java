@@ -20,14 +20,12 @@ import com.alibaba.otter.canal.parse.inbound.mysql.MysqlEventParser;
  * @since 1.0.25
  */
 public class RdsBinlogEventParserProxy extends MysqlEventParser {
-
     private String                    rdsOpenApiUrl             = "https://rds.aliyuncs.com/"; // openapi地址
     private String                    accesskey;                                              // 云账号的ak
     private String                    secretkey;                                              // 云账号sk
     private String                    instanceId;                                             // rds实例id
     private String                    directory;                                              // binlog目录
     private int                       batchFileSize             = 4;                          // 最多下载的binlog文件数量
-
     private RdsLocalBinlogEventParser rdsLocalBinlogEventParser = null;
     private ExecutorService           executorService           = Executors.newSingleThreadExecutor(r -> {
                                                                         Thread t = new Thread(r,
@@ -35,10 +33,11 @@ public class RdsBinlogEventParserProxy extends MysqlEventParser {
                                                                         t.setDaemon(true);
                                                                         return t;
                                                                     });
-
     @Override
     public void start() {
-        if (rdsLocalBinlogEventParser == null && StringUtils.isNotEmpty(accesskey) && StringUtils.isNotEmpty(secretkey)
+        if (rdsLocalBinlogEventParser == null
+            && StringUtils.isNotEmpty(accesskey)
+            && StringUtils.isNotEmpty(secretkey)
             && StringUtils.isNotEmpty(instanceId)) {
             rdsLocalBinlogEventParser = new RdsLocalBinlogEventParser();
             // rds oss mode

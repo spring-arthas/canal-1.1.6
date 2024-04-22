@@ -114,7 +114,7 @@ public class CanalMQStarter {
             CanalMQRunnable canalMQRunnable = new CanalMQRunnable(destination);
             canalMQWorks.put(canalInstance.getDestination(), canalMQRunnable);
             executorService.execute(canalMQRunnable);
-            logger.info("## Start the MQ work of destination:" + destination);
+            logger.info("【deployer】启动实例【{}】对应的canalMQRunnable成功，开始负责binlog解析后的数据发送至MQ", destination);
         }
     }
 
