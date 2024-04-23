@@ -26,6 +26,7 @@ public class CanalInstanceWithSpring extends AbstractCanalInstance {
 
     private static final Logger logger = LoggerFactory.getLogger(CanalInstanceWithSpring.class);
 
+    @Override
     public void start() {
         logger.info("【deployer】CanalInstanceWithSpring 开始启动实例【{}】相关组件", destination);
         super.start();

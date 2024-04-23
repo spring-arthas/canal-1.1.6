@@ -6,11 +6,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.Charset;
 import java.sql.Types;
-import java.util.Arrays;
-import java.util.BitSet;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.exception.ExceptionUtils;
@@ -100,14 +96,16 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
     private boolean                     filterQueryDdl      = false;
     // 是否跳过table相关的解析异常,比如表不存在或者列数量不匹配,issue 92
     private boolean                     filterTableError    = false;
-    // 新增rows过滤，用于仅订阅除rows以外的数据
+    // 新增rows过滤，用于仅订阅除rows以外的数据，目前并显式的配置在【instance.properties】文件中进行配置，默认就按照false进行处理
     private boolean                     filterRows          = false;
     private boolean                     useDruidDdlFilter   = true;
 
-    public LogEventConvert(){
+    public LogEventConvert(){}
 
-    }
-
+    /**
+     * 单个DML语句解析，对应MysqlMultiStageCoprocessor中的二阶段处理，即【DmlParserStage】解析器
+     * @param logEvent mysql 二进制Log日志事件
+     * */
     @Override
     public Entry parse(LogEvent logEvent, boolean isSeek) throws CanalParseException {
         if (logEvent == null || logEvent instanceof UnknownLogEvent) {
@@ -157,6 +155,413 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
         return null;
     }
 
+    public Entry parseRowsEvent(RowsLogEvent event) {
+        return parseRowsEvent(event, null);
+    }
+
+    public Entry parseRowsEvent(RowsLogEvent event, TableMeta tableMeta) {
+        if (filterRows) {
+            return null;
+        }
+        try {
+            if (Objects.isNull(tableMeta)) {
+                // 如果没有外部指定, 即MysqlMultiStageCoprocessor中的【SimpleParserStage】未解析当前dml涉及到的表元数据信息时，此处进行
+                // 重新解析
+                tableMeta = parseRowsEventForTableMeta(event);
+            }
+            if (Objects.isNull(tableMeta)) {
+                // 拿不到表结构,执行忽略
+                return null;
+            }
+
+            EventType eventType = null;
+            int type = event.getHeader().getType();
+            if (LogEvent.WRITE_ROWS_EVENT_V1 == type || LogEvent.WRITE_ROWS_EVENT == type) {
+                eventType = EventType.INSERT;
+            } else if (LogEvent.UPDATE_ROWS_EVENT_V1 == type || LogEvent.UPDATE_ROWS_EVENT == type || LogEvent.PARTIAL_UPDATE_ROWS_EVENT == type) {
+                eventType = EventType.UPDATE;
+            } else if (LogEvent.DELETE_ROWS_EVENT_V1 == type || LogEvent.DELETE_ROWS_EVENT == type) {
+                eventType = EventType.DELETE;
+            } else {
+                throw new CanalParseException("unsupport event type :" + event.getHeader().getType());
+            }
+
+            RowChange.Builder rowChangeBuider = RowChange.newBuilder();
+            rowChangeBuider.setTableId(event.getTableId());
+            rowChangeBuider.setIsDdl(false);
+            rowChangeBuider.setEventType(eventType);
+            RowsLogBuffer buffer = event.getRowsBuf(charset.name());
+            // 得到当前dml涉及到表所有列
+            BitSet columns = event.getColumns();
+            // 得到当前dml涉及到的表产生字段值变化的列
+            BitSet changeColumns = event.getChangeColumns();
+            boolean tableError = false;
+            int rowsCount = 0;
+            while (buffer.nextOneRow(columns, false)) {
+                // 处理row记录
+                RowData.Builder rowDataBuilder = RowData.newBuilder();
+                if (EventType.INSERT == eventType) {
+                    // insert的记录放在before字段中
+                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, true, tableMeta);
+                } else if (EventType.DELETE == eventType) {
+                    // delete的记录放在before字段中
+                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, false, tableMeta);
+                } else {
+                    // update需要处理before/after
+                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, false, tableMeta);
+                    if (!buffer.nextOneRow(changeColumns, true)) {
+                        rowChangeBuider.addRowDatas(rowDataBuilder.build());
+                        break;
+                    }
+                    tableError |= parseOneRow(rowDataBuilder, event, buffer, changeColumns, true, tableMeta);
+                }
+                rowsCount++;
+                rowChangeBuider.addRowDatas(rowDataBuilder.build());
+            }
+            TableMapLogEvent table = event.getTable();
+            Header header = createHeader(event.getHeader(),
+                table.getDbName(),
+                table.getTableName(),
+                eventType,
+                rowsCount);
+
+            RowChange rowChange = rowChangeBuider.build();
+            if (tableError) {
+                Entry entry = createEntry(header, EntryType.ROWDATA, ByteString.EMPTY);
+                logger.warn("table parser error : {}storeValue: {}", entry.toString(), rowChange.toString());
+                return null;
+            } else {
+                Entry entry = createEntry(header, EntryType.ROWDATA, rowChange.toByteString());
+                return entry;
+            }
+        } catch (Exception e) {
+            throw new CanalParseException("parse row data failed.", e);
+        }
+    }
+
+    private boolean parseOneRow(RowData.Builder rowDataBuilder,
+                                RowsLogEvent event,
+                                RowsLogBuffer buffer,
+                                BitSet cols,
+                                boolean isAfter,
+                                TableMeta tableMeta) throws UnsupportedEncodingException {
+        int columnCnt = event.getTable().getColumnCnt();
+        ColumnInfo[] columnInfo = event.getTable().getColumnInfo();
+        // mysql8.0针对set @@global.binlog_row_metadata='FULL' 可以记录部分的metadata信息
+        boolean existOptionalMetaData = event.getTable().isExistOptionalMetaData();
+        boolean tableError = false;
+        // check table fileds count，只能处理加字段
+        boolean existRDSNoPrimaryKey = false;
+        // 获取字段过滤条件
+        List<String> fieldList = null;
+        List<String> blackFieldList = null;
+
+        if (tableMeta != null) {
+            fieldList = fieldFilterMap.get(tableMeta.getFullName().toUpperCase());
+            blackFieldList = fieldBlackFilterMap.get(tableMeta.getFullName().toUpperCase());
+        }
+
+        if (tableMeta != null && columnInfo.length > tableMeta.getFields().size()) {
+            if (tableMetaCache.isOnRDS() || tableMetaCache.isOnPolarX()) {
+                // 特殊处理下RDS的场景
+                List<FieldMeta> primaryKeys = tableMeta.getPrimaryFields();
+                if (primaryKeys == null || primaryKeys.isEmpty()) {
+                    if (columnInfo.length == tableMeta.getFields().size() + 1
+                            && columnInfo[columnInfo.length - 1].type == LogEvent.MYSQL_TYPE_LONGLONG) {
+                        existRDSNoPrimaryKey = true;
+                    }
+                }
+            }
+
+            EntryPosition position = createPosition(event.getHeader());
+            if (!existRDSNoPrimaryKey) {
+                // online ddl增加字段操作步骤：
+                // 1. 新增一张临时表，将需要做ddl表的数据全量导入
+                // 2. 在老表上建立I/U/D的trigger，增量的将数据插入到临时表
+                // 3. 锁住应用请求，将临时表rename为老表的名字，完成增加字段的操作
+                // 尝试做一次reload，可能因为ddl没有正确解析，或者使用了类似online ddl的操作
+                // 因为online ddl没有对应表名的alter语法，所以不会有clear cache的操作
+                tableMeta = getTableMeta(event.getTable().getDbName(), event.getTable().getTableName(), false, position);// 强制重新获取一次
+                if (tableMeta == null) {
+                    tableError = true;
+                    if (!filterTableError) {
+                        throw new CanalParseException("not found [" + event.getTable().getDbName() + "."
+                                + event.getTable().getTableName() + "] in db , pls check!");
+                    }
+                }
+
+                // 在做一次判断
+                if (tableMeta != null && columnInfo.length > tableMeta.getFields().size()) {
+                    tableError = true;
+                    if (!filterTableError) {
+                        throw new CanalParseException("column size is not match for table:" + tableMeta.getFullName()
+                                + "," + columnInfo.length + " vs " + tableMeta.getFields().size());
+                    }
+                }
+                // } else {
+                // logger.warn("[" + event.getTable().getDbName() + "." +
+                // event.getTable().getTableName()
+                // + "] is no primary key , skip alibaba_rds_row_id column");
+            }
+        }
+
+        for (int i = 0; i < columnCnt; i++) {
+            ColumnInfo info = columnInfo[i];
+            // mysql 5.6开始支持nolob/mininal类型,并不一定记录所有的列,需要进行判断
+            if (!cols.get(i)) {
+                continue;
+            }
+
+            if (existRDSNoPrimaryKey && i == columnCnt - 1 && info.type == LogEvent.MYSQL_TYPE_LONGLONG) {
+                // 不解析最后一列
+                String rdsRowIdColumnName = "__#alibaba_rds_row_id#__";
+                if (tableMetaCache.isOnPolarX()) {
+                    rdsRowIdColumnName = "_drds_implicit_id_";
+                }
+                buffer.nextValue(rdsRowIdColumnName, i, info.type, info.meta, false);
+                Column.Builder columnBuilder = Column.newBuilder();
+                columnBuilder.setName(rdsRowIdColumnName);
+                columnBuilder.setIsKey(true);
+                columnBuilder.setMysqlType("bigint");
+                columnBuilder.setIndex(i);
+                columnBuilder.setIsNull(false);
+                Serializable value = buffer.getValue();
+                columnBuilder.setValue(value.toString());
+                columnBuilder.setSqlType(Types.BIGINT);
+                columnBuilder.setUpdated(false);
+
+                if (needField(fieldList, blackFieldList, columnBuilder.getName())) {
+                    if (isAfter) {
+                        rowDataBuilder.addAfterColumns(columnBuilder.build());
+                    } else {
+                        rowDataBuilder.addBeforeColumns(columnBuilder.build());
+                    }
+                }
+                continue;
+            }
+
+            FieldMeta fieldMeta = null;
+            if (tableMeta != null && !tableError) {
+                // 处理file meta
+                fieldMeta = tableMeta.getFields().get(i);
+            }
+
+            if (fieldMeta != null && existOptionalMetaData && tableMetaCache.isOnTSDB()) {
+                // check column info
+                boolean check = StringUtils.equalsIgnoreCase(fieldMeta.getColumnName(), info.name);
+                check &= (fieldMeta.isUnsigned() == info.unsigned);
+                check &= (fieldMeta.isNullable() == info.nullable);
+
+                if (!check) {
+                    throw new CanalParseException("MySQL8.0 unmatch column metadata & pls submit issue , table : "
+                        + tableMeta.getFullName() + ", db fieldMeta : "
+                        + fieldMeta.toString() + " , binlog fieldMeta : " + info.toString()
+                        + " , on : " + event.getHeader().getLogFileName() + ":"
+                        + (event.getHeader().getLogPos() - event.getHeader().getEventLen()));
+                }
+            }
+
+            Column.Builder columnBuilder = Column.newBuilder();
+            if (fieldMeta != null) {
+                columnBuilder.setName(fieldMeta.getColumnName());
+                columnBuilder.setIsKey(fieldMeta.isKey());
+                // 增加mysql type类型,issue 73
+                columnBuilder.setMysqlType(fieldMeta.getColumnType());
+            } else if (existOptionalMetaData) {
+                columnBuilder.setName(info.name);
+                columnBuilder.setIsKey(info.pk);
+                // mysql8.0里没有mysql type类型
+                // columnBuilder.setMysqlType(fieldMeta.getColumnType());
+            }
+            columnBuilder.setIndex(i);
+            columnBuilder.setIsNull(false);
+
+            // fixed issue
+            // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
+            boolean isBinary = false;
+            if (fieldMeta != null) {
+                if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")) {
+                    isBinary = true;
+                } else if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY")) {
+                    isBinary = true;
+                }
+            }
+
+            buffer.nextValue(columnBuilder.getName(), i, info.type, info.meta, isBinary);
+            int javaType = buffer.getJavaType();
+            if (buffer.isNull()) {
+                columnBuilder.setIsNull(true);
+            } else {
+                final Serializable value = buffer.getValue();
+                // 处理各种类型
+                switch (javaType) {
+                    case Types.INTEGER:
+                    case Types.TINYINT:
+                    case Types.SMALLINT:
+                    case Types.BIGINT:
+                        // 处理unsigned类型
+                        Number number = (Number) value;
+                        boolean isUnsigned = (fieldMeta != null ? fieldMeta.isUnsigned() : (existOptionalMetaData ? info.unsigned : false));
+                        if (isUnsigned && number.longValue() < 0) {
+                            switch (buffer.getLength()) {
+                                case 1: /* MYSQL_TYPE_TINY */
+                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE
+                                            + number.intValue())));
+                                    javaType = Types.SMALLINT; // 往上加一个量级
+                                    break;
+
+                                case 2: /* MYSQL_TYPE_SHORT */
+                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(SMALLINT_MAX_VALUE
+                                            + number.intValue())));
+                                    javaType = Types.INTEGER; // 往上加一个量级
+                                    break;
+
+                                case 3: /* MYSQL_TYPE_INT24 */
+                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(MEDIUMINT_MAX_VALUE
+                                            + number.intValue())));
+                                    javaType = Types.INTEGER; // 往上加一个量级
+                                    break;
+
+                                case 4: /* MYSQL_TYPE_LONG */
+                                    columnBuilder.setValue(String.valueOf(Long.valueOf(INTEGER_MAX_VALUE
+                                            + number.longValue())));
+                                    javaType = Types.BIGINT; // 往上加一个量级
+                                    break;
+
+                                case 8: /* MYSQL_TYPE_LONGLONG */
+                                    columnBuilder.setValue(BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue()))
+                                            .toString());
+                                    javaType = Types.DECIMAL; // 往上加一个量级，避免执行出错
+                                    break;
+                            }
+                        } else {
+                            // 对象为number类型，直接valueof即可
+                            columnBuilder.setValue(String.valueOf(value));
+                        }
+                        break;
+                    case Types.REAL: // float
+                    case Types.DOUBLE: // double
+                        // 对象为number类型，直接valueof即可
+                        columnBuilder.setValue(String.valueOf(value));
+                        break;
+                    case Types.BIT:// bit
+                        // 对象为number类型
+                        columnBuilder.setValue(String.valueOf(value));
+                        break;
+                    case Types.DECIMAL:
+                        columnBuilder.setValue(((BigDecimal) value).toPlainString());
+                        break;
+                    case Types.TIMESTAMP:
+                        // 修复时间边界值
+                        // String v = value.toString();
+                        // v = v.substring(0, v.length() - 2);
+                        // columnBuilder.setValue(v);
+                        // break;
+                    case Types.TIME:
+                    case Types.DATE:
+                        // 需要处理year
+                        columnBuilder.setValue(value.toString());
+                        break;
+                    case Types.BINARY:
+                    case Types.VARBINARY:
+                    case Types.LONGVARBINARY:
+                        // fixed text encoding
+                        // https://github.com/AlibabaTech/canal/issues/18
+                        // mysql binlog中blob/text都处理为blob类型，需要反查table
+                        // meta，按编码解析text
+                        if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
+                            columnBuilder.setValue(new String((byte[]) value, charset));
+                            javaType = Types.CLOB;
+                        } else {
+                            // byte数组，直接使用iso-8859-1保留对应编码，浪费内存
+                            columnBuilder.setValue(new String((byte[]) value, ISO_8859_1));
+                            // columnBuilder.setValueBytes(ByteString.copyFrom((byte[])
+                            // value));
+                            javaType = Types.BLOB;
+                        }
+                        break;
+                    case Types.CHAR:
+                    case Types.VARCHAR:
+                        columnBuilder.setValue(value.toString());
+                        break;
+                    default:
+                        columnBuilder.setValue(value.toString());
+                }
+            }
+
+            columnBuilder.setSqlType(javaType);
+            // 设置是否update的标记位
+            columnBuilder.setUpdated(isAfter && isUpdate(rowDataBuilder.getBeforeColumnsList(), columnBuilder.getIsNull() ? null : columnBuilder.getValue(), i));
+            if (needField(fieldList, blackFieldList, columnBuilder.getName())) {
+                if (isAfter) {
+                    rowDataBuilder.addAfterColumns(columnBuilder.build());
+                } else {
+                    rowDataBuilder.addBeforeColumns(columnBuilder.build());
+                }
+            }
+        }
+
+        return tableError;
+
+    }
+
+
+    /**
+     * 根据event解析所涉及到的dml语句对应的表元数据信息
+     * @param event = RowsLogEvent（DeleteRowsLogEvent，UpdateRowsLogEvent，InsertRowsLogEvent）
+     * */
+    public TableMeta parseRowsEventForTableMeta(RowsLogEvent event) {
+        TableMapLogEvent table = event.getTable();
+        if (Objects.isNull(table)) {
+            // tableId对应的记录不存在
+            throw new TableIdNotFoundException("not found tableId:" + event.getTableId());
+        }
+
+        boolean isHeartBeat = isAliSQLHeartBeat(table.getDbName(), table.getTableName());
+        boolean isRDSHeartBeat = tableMetaCache.isOnRDS() && isRDSHeartBeat(table.getDbName(), table.getTableName());
+        String fullname = table.getDbName() + "." + table.getTableName();
+        // check name filter 如果当前dml对应的库表名称未配置在nameFilter【canal.instance.filter.regex】可管理到的库表配置中，则不用解析
+        // 当前dml对应的表元数据信息，直接设置为null进行返回
+        if (nameFilter != null && !nameFilter.filter(fullname)) {
+            return null;
+        }
+        if (nameBlackFilter != null && nameBlackFilter.filter(fullname)) {
+            return null;
+        }
+
+        // if (isHeartBeat || isRDSHeartBeat) {
+        // // 忽略rds模式的mysql.ha_health_check心跳数据
+        // return null;
+        // }
+        TableMeta tableMeta = null;
+        if (isRDSHeartBeat) {
+            // 处理rds模式的mysql.ha_health_check心跳数据
+            // 主要RDS的心跳表基本无权限,需要mock一个tableMeta
+            FieldMeta idMeta = new FieldMeta("id", "bigint(20)", true, false, "0");
+            FieldMeta typeMeta = new FieldMeta("type", "char(1)", false, true, "0");
+            tableMeta = new TableMeta(table.getDbName(), table.getTableName(), Arrays.asList(idMeta, typeMeta));
+        } else if (isHeartBeat) {
+            // 处理alisql模式的test.heartbeat心跳数据
+            // 心跳表基本无权限,需要mock一个tableMeta
+            FieldMeta idMeta = new FieldMeta("id", "smallint(6)", false, true, null);
+            FieldMeta typeMeta = new FieldMeta("ts", "int(11)", true, false, null);
+            tableMeta = new TableMeta(table.getDbName(), table.getTableName(), Arrays.asList(idMeta, typeMeta));
+        }
+
+        EntryPosition position = createPosition(event.getHeader());
+        if (tableMetaCache != null && tableMeta == null) {// 入错存在table meta
+            tableMeta = getTableMeta(table.getDbName(), table.getTableName(), true, position);
+            if (tableMeta == null) {
+                if (!filterTableError) {
+                    throw new CanalParseException("not found [" + fullname + "] in db , pls check!");
+                }
+            }
+        }
+
+        return tableMeta;
+    }
+
+    @Override
     public void reset() {
         // do nothing
         if (tableMetaCache != null) {
@@ -455,61 +860,6 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
         return createEntry(header, EntryType.TRANSACTIONEND, transactionEnd.toByteString());
     }
 
-    public TableMeta parseRowsEventForTableMeta(RowsLogEvent event) {
-        TableMapLogEvent table = event.getTable();
-        if (table == null) {
-            // tableId对应的记录不存在
-            throw new TableIdNotFoundException("not found tableId:" + event.getTableId());
-        }
-
-        boolean isHeartBeat = isAliSQLHeartBeat(table.getDbName(), table.getTableName());
-        boolean isRDSHeartBeat = tableMetaCache.isOnRDS() && isRDSHeartBeat(table.getDbName(), table.getTableName());
-
-        String fullname = table.getDbName() + "." + table.getTableName();
-        // check name filter
-        if (nameFilter != null && !nameFilter.filter(fullname)) {
-            return null;
-        }
-        if (nameBlackFilter != null && nameBlackFilter.filter(fullname)) {
-            return null;
-        }
-
-        // if (isHeartBeat || isRDSHeartBeat) {
-        // // 忽略rds模式的mysql.ha_health_check心跳数据
-        // return null;
-        // }
-        TableMeta tableMeta = null;
-        if (isRDSHeartBeat) {
-            // 处理rds模式的mysql.ha_health_check心跳数据
-            // 主要RDS的心跳表基本无权限,需要mock一个tableMeta
-            FieldMeta idMeta = new FieldMeta("id", "bigint(20)", true, false, "0");
-            FieldMeta typeMeta = new FieldMeta("type", "char(1)", false, true, "0");
-            tableMeta = new TableMeta(table.getDbName(), table.getTableName(), Arrays.asList(idMeta, typeMeta));
-        } else if (isHeartBeat) {
-            // 处理alisql模式的test.heartbeat心跳数据
-            // 心跳表基本无权限,需要mock一个tableMeta
-            FieldMeta idMeta = new FieldMeta("id", "smallint(6)", false, true, null);
-            FieldMeta typeMeta = new FieldMeta("ts", "int(11)", true, false, null);
-            tableMeta = new TableMeta(table.getDbName(), table.getTableName(), Arrays.asList(idMeta, typeMeta));
-        }
-
-        EntryPosition position = createPosition(event.getHeader());
-        if (tableMetaCache != null && tableMeta == null) {// 入错存在table meta
-            tableMeta = getTableMeta(table.getDbName(), table.getTableName(), true, position);
-            if (tableMeta == null) {
-                if (!filterTableError) {
-                    throw new CanalParseException("not found [" + fullname + "] in db , pls check!");
-                }
-            }
-        }
-
-        return tableMeta;
-    }
-
-    public Entry parseRowsEvent(RowsLogEvent event) {
-        return parseRowsEvent(event, null);
-    }
-
     public void parseTableMapEvent(TableMapLogEvent event) {
         try {
             String charsetDbName = new String(event.getDbName().getBytes(ISO_8859_1), charset.name());
@@ -522,357 +872,10 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
         }
     }
 
-    public Entry parseRowsEvent(RowsLogEvent event, TableMeta tableMeta) {
-        if (filterRows) {
-            return null;
-        }
-        try {
-            if (tableMeta == null) { // 如果没有外部指定
-                tableMeta = parseRowsEventForTableMeta(event);
-            }
-
-            if (tableMeta == null) {
-                // 拿不到表结构,执行忽略
-                return null;
-            }
-
-            EventType eventType = null;
-            int type = event.getHeader().getType();
-            if (LogEvent.WRITE_ROWS_EVENT_V1 == type || LogEvent.WRITE_ROWS_EVENT == type) {
-                eventType = EventType.INSERT;
-            } else if (LogEvent.UPDATE_ROWS_EVENT_V1 == type || LogEvent.UPDATE_ROWS_EVENT == type
-                       || LogEvent.PARTIAL_UPDATE_ROWS_EVENT == type) {
-                eventType = EventType.UPDATE;
-            } else if (LogEvent.DELETE_ROWS_EVENT_V1 == type || LogEvent.DELETE_ROWS_EVENT == type) {
-                eventType = EventType.DELETE;
-            } else {
-                throw new CanalParseException("unsupport event type :" + event.getHeader().getType());
-            }
-
-            RowChange.Builder rowChangeBuider = RowChange.newBuilder();
-            rowChangeBuider.setTableId(event.getTableId());
-            rowChangeBuider.setIsDdl(false);
-
-            rowChangeBuider.setEventType(eventType);
-            RowsLogBuffer buffer = event.getRowsBuf(charset.name());
-            BitSet columns = event.getColumns();
-            BitSet changeColumns = event.getChangeColumns();
-
-            boolean tableError = false;
-            int rowsCount = 0;
-            while (buffer.nextOneRow(columns, false)) {
-                // 处理row记录
-                RowData.Builder rowDataBuilder = RowData.newBuilder();
-                if (EventType.INSERT == eventType) {
-                    // insert的记录放在before字段中
-                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, true, tableMeta);
-                } else if (EventType.DELETE == eventType) {
-                    // delete的记录放在before字段中
-                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, false, tableMeta);
-                } else {
-                    // update需要处理before/after
-                    tableError |= parseOneRow(rowDataBuilder, event, buffer, columns, false, tableMeta);
-                    if (!buffer.nextOneRow(changeColumns, true)) {
-                        rowChangeBuider.addRowDatas(rowDataBuilder.build());
-                        break;
-                    }
-
-                    tableError |= parseOneRow(rowDataBuilder, event, buffer, changeColumns, true, tableMeta);
-                }
-
-                rowsCount++;
-                rowChangeBuider.addRowDatas(rowDataBuilder.build());
-            }
-            TableMapLogEvent table = event.getTable();
-            Header header = createHeader(event.getHeader(),
-                table.getDbName(),
-                table.getTableName(),
-                eventType,
-                rowsCount);
-
-            RowChange rowChange = rowChangeBuider.build();
-            if (tableError) {
-                Entry entry = createEntry(header, EntryType.ROWDATA, ByteString.EMPTY);
-                logger.warn("table parser error : {}storeValue: {}", entry.toString(), rowChange.toString());
-                return null;
-            } else {
-                Entry entry = createEntry(header, EntryType.ROWDATA, rowChange.toByteString());
-                return entry;
-            }
-        } catch (Exception e) {
-            throw new CanalParseException("parse row data failed.", e);
-        }
-    }
-
     private EntryPosition createPosition(LogHeader logHeader) {
         return new EntryPosition(logHeader.getLogFileName(), logHeader.getLogPos() - logHeader.getEventLen(), // startPos
             logHeader.getWhen() * 1000L,
             logHeader.getServerId()); // 记录到秒
-    }
-
-    private boolean parseOneRow(RowData.Builder rowDataBuilder, RowsLogEvent event, RowsLogBuffer buffer, BitSet cols,
-                                boolean isAfter, TableMeta tableMeta) throws UnsupportedEncodingException {
-        int columnCnt = event.getTable().getColumnCnt();
-        ColumnInfo[] columnInfo = event.getTable().getColumnInfo();
-        // mysql8.0针对set @@global.binlog_row_metadata='FULL' 可以记录部分的metadata信息
-        boolean existOptionalMetaData = event.getTable().isExistOptionalMetaData();
-        boolean tableError = false;
-        // check table fileds count，只能处理加字段
-        boolean existRDSNoPrimaryKey = false;
-        // 获取字段过滤条件
-        List<String> fieldList = null;
-        List<String> blackFieldList = null;
-
-        if (tableMeta != null) {
-            fieldList = fieldFilterMap.get(tableMeta.getFullName().toUpperCase());
-            blackFieldList = fieldBlackFilterMap.get(tableMeta.getFullName().toUpperCase());
-        }
-
-        if (tableMeta != null && columnInfo.length > tableMeta.getFields().size()) {
-            if (tableMetaCache.isOnRDS() || tableMetaCache.isOnPolarX()) {
-                // 特殊处理下RDS的场景
-                List<FieldMeta> primaryKeys = tableMeta.getPrimaryFields();
-                if (primaryKeys == null || primaryKeys.isEmpty()) {
-                    if (columnInfo.length == tableMeta.getFields().size() + 1
-                        && columnInfo[columnInfo.length - 1].type == LogEvent.MYSQL_TYPE_LONGLONG) {
-                        existRDSNoPrimaryKey = true;
-                    }
-                }
-            }
-
-            EntryPosition position = createPosition(event.getHeader());
-            if (!existRDSNoPrimaryKey) {
-                // online ddl增加字段操作步骤：
-                // 1. 新增一张临时表，将需要做ddl表的数据全量导入
-                // 2. 在老表上建立I/U/D的trigger，增量的将数据插入到临时表
-                // 3. 锁住应用请求，将临时表rename为老表的名字，完成增加字段的操作
-                // 尝试做一次reload，可能因为ddl没有正确解析，或者使用了类似online ddl的操作
-                // 因为online ddl没有对应表名的alter语法，所以不会有clear cache的操作
-                tableMeta = getTableMeta(event.getTable().getDbName(), event.getTable().getTableName(), false, position);// 强制重新获取一次
-                if (tableMeta == null) {
-                    tableError = true;
-                    if (!filterTableError) {
-                        throw new CanalParseException("not found [" + event.getTable().getDbName() + "."
-                                                      + event.getTable().getTableName() + "] in db , pls check!");
-                    }
-                }
-
-                // 在做一次判断
-                if (tableMeta != null && columnInfo.length > tableMeta.getFields().size()) {
-                    tableError = true;
-                    if (!filterTableError) {
-                        throw new CanalParseException("column size is not match for table:" + tableMeta.getFullName()
-                                                      + "," + columnInfo.length + " vs " + tableMeta.getFields().size());
-                    }
-                }
-                // } else {
-                // logger.warn("[" + event.getTable().getDbName() + "." +
-                // event.getTable().getTableName()
-                // + "] is no primary key , skip alibaba_rds_row_id column");
-            }
-        }
-
-        for (int i = 0; i < columnCnt; i++) {
-            ColumnInfo info = columnInfo[i];
-            // mysql 5.6开始支持nolob/mininal类型,并不一定记录所有的列,需要进行判断
-            if (!cols.get(i)) {
-                continue;
-            }
-
-            if (existRDSNoPrimaryKey && i == columnCnt - 1 && info.type == LogEvent.MYSQL_TYPE_LONGLONG) {
-                // 不解析最后一列
-                String rdsRowIdColumnName = "__#alibaba_rds_row_id#__";
-                if (tableMetaCache.isOnPolarX()) {
-                    rdsRowIdColumnName = "_drds_implicit_id_";
-                }
-                buffer.nextValue(rdsRowIdColumnName, i, info.type, info.meta, false);
-                Column.Builder columnBuilder = Column.newBuilder();
-                columnBuilder.setName(rdsRowIdColumnName);
-                columnBuilder.setIsKey(true);
-                columnBuilder.setMysqlType("bigint");
-                columnBuilder.setIndex(i);
-                columnBuilder.setIsNull(false);
-                Serializable value = buffer.getValue();
-                columnBuilder.setValue(value.toString());
-                columnBuilder.setSqlType(Types.BIGINT);
-                columnBuilder.setUpdated(false);
-
-                if (needField(fieldList, blackFieldList, columnBuilder.getName())) {
-                    if (isAfter) {
-                        rowDataBuilder.addAfterColumns(columnBuilder.build());
-                    } else {
-                        rowDataBuilder.addBeforeColumns(columnBuilder.build());
-                    }
-                }
-                continue;
-            }
-
-            FieldMeta fieldMeta = null;
-            if (tableMeta != null && !tableError) {
-                // 处理file meta
-                fieldMeta = tableMeta.getFields().get(i);
-            }
-
-            if (fieldMeta != null && existOptionalMetaData && tableMetaCache.isOnTSDB()) {
-                // check column info
-                boolean check = StringUtils.equalsIgnoreCase(fieldMeta.getColumnName(), info.name);
-                check &= (fieldMeta.isUnsigned() == info.unsigned);
-                check &= (fieldMeta.isNullable() == info.nullable);
-
-                if (!check) {
-                    throw new CanalParseException("MySQL8.0 unmatch column metadata & pls submit issue , table : "
-                                                  + tableMeta.getFullName() + ", db fieldMeta : "
-                                                  + fieldMeta.toString() + " , binlog fieldMeta : " + info.toString()
-                                                  + " , on : " + event.getHeader().getLogFileName() + ":"
-                                                  + (event.getHeader().getLogPos() - event.getHeader().getEventLen()));
-                }
-            }
-
-            Column.Builder columnBuilder = Column.newBuilder();
-            if (fieldMeta != null) {
-                columnBuilder.setName(fieldMeta.getColumnName());
-                columnBuilder.setIsKey(fieldMeta.isKey());
-                // 增加mysql type类型,issue 73
-                columnBuilder.setMysqlType(fieldMeta.getColumnType());
-            } else if (existOptionalMetaData) {
-                columnBuilder.setName(info.name);
-                columnBuilder.setIsKey(info.pk);
-                // mysql8.0里没有mysql type类型
-                // columnBuilder.setMysqlType(fieldMeta.getColumnType());
-            }
-            columnBuilder.setIndex(i);
-            columnBuilder.setIsNull(false);
-
-            // fixed issue
-            // https://github.com/alibaba/canal/issues/66，特殊处理binary/varbinary，不能做编码处理
-            boolean isBinary = false;
-            if (fieldMeta != null) {
-                if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "VARBINARY")) {
-                    isBinary = true;
-                } else if (StringUtils.containsIgnoreCase(fieldMeta.getColumnType(), "BINARY")) {
-                    isBinary = true;
-                }
-            }
-
-            buffer.nextValue(columnBuilder.getName(), i, info.type, info.meta, isBinary);
-            int javaType = buffer.getJavaType();
-            if (buffer.isNull()) {
-                columnBuilder.setIsNull(true);
-            } else {
-                final Serializable value = buffer.getValue();
-                // 处理各种类型
-                switch (javaType) {
-                    case Types.INTEGER:
-                    case Types.TINYINT:
-                    case Types.SMALLINT:
-                    case Types.BIGINT:
-                        // 处理unsigned类型
-                        Number number = (Number) value;
-                        boolean isUnsigned = (fieldMeta != null ? fieldMeta.isUnsigned() : (existOptionalMetaData ? info.unsigned : false));
-                        if (isUnsigned && number.longValue() < 0) {
-                            switch (buffer.getLength()) {
-                                case 1: /* MYSQL_TYPE_TINY */
-                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(TINYINT_MAX_VALUE
-                                                                                          + number.intValue())));
-                                    javaType = Types.SMALLINT; // 往上加一个量级
-                                    break;
-
-                                case 2: /* MYSQL_TYPE_SHORT */
-                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(SMALLINT_MAX_VALUE
-                                                                                          + number.intValue())));
-                                    javaType = Types.INTEGER; // 往上加一个量级
-                                    break;
-
-                                case 3: /* MYSQL_TYPE_INT24 */
-                                    columnBuilder.setValue(String.valueOf(Integer.valueOf(MEDIUMINT_MAX_VALUE
-                                                                                          + number.intValue())));
-                                    javaType = Types.INTEGER; // 往上加一个量级
-                                    break;
-
-                                case 4: /* MYSQL_TYPE_LONG */
-                                    columnBuilder.setValue(String.valueOf(Long.valueOf(INTEGER_MAX_VALUE
-                                                                                       + number.longValue())));
-                                    javaType = Types.BIGINT; // 往上加一个量级
-                                    break;
-
-                                case 8: /* MYSQL_TYPE_LONGLONG */
-                                    columnBuilder.setValue(BIGINT_MAX_VALUE.add(BigInteger.valueOf(number.longValue()))
-                                        .toString());
-                                    javaType = Types.DECIMAL; // 往上加一个量级，避免执行出错
-                                    break;
-                            }
-                        } else {
-                            // 对象为number类型，直接valueof即可
-                            columnBuilder.setValue(String.valueOf(value));
-                        }
-                        break;
-                    case Types.REAL: // float
-                    case Types.DOUBLE: // double
-                        // 对象为number类型，直接valueof即可
-                        columnBuilder.setValue(String.valueOf(value));
-                        break;
-                    case Types.BIT:// bit
-                        // 对象为number类型
-                        columnBuilder.setValue(String.valueOf(value));
-                        break;
-                    case Types.DECIMAL:
-                        columnBuilder.setValue(((BigDecimal) value).toPlainString());
-                        break;
-                    case Types.TIMESTAMP:
-                        // 修复时间边界值
-                        // String v = value.toString();
-                        // v = v.substring(0, v.length() - 2);
-                        // columnBuilder.setValue(v);
-                        // break;
-                    case Types.TIME:
-                    case Types.DATE:
-                        // 需要处理year
-                        columnBuilder.setValue(value.toString());
-                        break;
-                    case Types.BINARY:
-                    case Types.VARBINARY:
-                    case Types.LONGVARBINARY:
-                        // fixed text encoding
-                        // https://github.com/AlibabaTech/canal/issues/18
-                        // mysql binlog中blob/text都处理为blob类型，需要反查table
-                        // meta，按编码解析text
-                        if (fieldMeta != null && isText(fieldMeta.getColumnType())) {
-                            columnBuilder.setValue(new String((byte[]) value, charset));
-                            javaType = Types.CLOB;
-                        } else {
-                            // byte数组，直接使用iso-8859-1保留对应编码，浪费内存
-                            columnBuilder.setValue(new String((byte[]) value, ISO_8859_1));
-                            // columnBuilder.setValueBytes(ByteString.copyFrom((byte[])
-                            // value));
-                            javaType = Types.BLOB;
-                        }
-                        break;
-                    case Types.CHAR:
-                    case Types.VARCHAR:
-                        columnBuilder.setValue(value.toString());
-                        break;
-                    default:
-                        columnBuilder.setValue(value.toString());
-                }
-            }
-
-            columnBuilder.setSqlType(javaType);
-            // 设置是否update的标记位
-            columnBuilder.setUpdated(isAfter
-                                     && isUpdate(rowDataBuilder.getBeforeColumnsList(),
-                                         columnBuilder.getIsNull() ? null : columnBuilder.getValue(),
-                                         i));
-            if (needField(fieldList, blackFieldList, columnBuilder.getName())) {
-                if (isAfter) {
-                    rowDataBuilder.addAfterColumns(columnBuilder.build());
-                } else {
-                    rowDataBuilder.addBeforeColumns(columnBuilder.build());
-                }
-            }
-        }
-
-        return tableError;
-
     }
 
     private Entry buildQueryEntry(String queryString, LogHeader logHeader, String tableName) {
@@ -895,8 +898,7 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
         return createHeader(logHeader, schemaName, tableName, eventType, -1);
     }
 
-    private Header createHeader(LogHeader logHeader, String schemaName, String tableName, EventType eventType,
-                                Integer rowsCount) {
+    private Header createHeader(LogHeader logHeader, String schemaName, String tableName, EventType eventType, Integer rowsCount) {
         // header会做信息冗余,方便以后做检索或者过滤
         Header.Builder headerBuilder = Header.newBuilder();
         headerBuilder.setVersion(version);

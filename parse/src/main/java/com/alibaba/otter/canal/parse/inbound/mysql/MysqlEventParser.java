@@ -156,6 +156,7 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
         }
     }
 
+    @Override
     public void start() throws CanalParseException {
         if (runningInfo == null) { // 第一次链接主库
             runningInfo = masterInfo;
@@ -164,6 +165,7 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
         super.start();
     }
 
+    @Override
     public void stop() throws CanalParseException {
         if (metaConnection != null) {
             try {
@@ -341,6 +343,7 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
         }
     }
 
+    @Override
     protected EntryPosition findStartPosition(ErosaConnection connection) throws IOException {
         if (isGTIDMode()) {
             // GTID模式下，CanalLogPositionManager里取最后的gtid，没有则取instanc配置中的

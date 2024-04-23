@@ -520,7 +520,7 @@ public class CanalController {
                 }
             });
         }
-        // 优先启动embeded服务
+        // 优先启动embeded服务，构建canal instance对应的实例bean对象创建器
         embededCanalServer.start();
         // 尝试启动一下非lazy状态的通道
         for (Map.Entry<String, InstanceConfig> entry : instanceConfigs.entrySet()) {
@@ -528,7 +528,7 @@ public class CanalController {
             InstanceConfig config = entry.getValue();
             // 创建destination的工作节点
             if (!embededCanalServer.isStart(destination)) {
-                // HA机制启动
+                // HA机制启动，利用ServerRunningMonitor运行监听器启动destination实例
                 ServerRunningMonitor runningMonitor = ServerRunningMonitors.getRunningMonitor(destination);
                 if (!config.getLazy() && !runningMonitor.isStart()) {
                     runningMonitor.start();

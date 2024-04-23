@@ -23,10 +23,8 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
     private int                      bufferSize    = 1024;
     private int                      indexMask;
     private CanalEntry.Entry[]       entries;
-
     private AtomicLong               putSequence   = new AtomicLong(INIT_SQEUENCE); // 代表当前put操作最后一次写操作发生的位置
     private AtomicLong               flushSequence = new AtomicLong(INIT_SQEUENCE); // 代表满足flush条件后最后一次数据flush的时间
-
     private TransactionFlushCallback flushCallback;
 
     public EventTransactionBuffer(){
@@ -37,6 +35,7 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         this.flushCallback = flushCallback;
     }
 
+    @Override
     public void start() throws CanalStoreException {
         super.start();
         if (Integer.bitCount(bufferSize) != 1) {
@@ -48,6 +47,7 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         entries = new CanalEntry.Entry[bufferSize];
     }
 
+    @Override
     public void stop() throws CanalStoreException {
         putSequence.set(INIT_SQEUENCE);
         flushSequence.set(INIT_SQEUENCE);
@@ -120,6 +120,8 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
                 transaction.add(this.entries[getIndex(next)]);
             }
 
+            // 通过flushCallback开始消费数据，数据来自【MysqlMultiStageCoprocessor】最后一阶段【SinkStoreStage】中的transactionBuffer.add(event.getEntry())
+            // flushCallback定义在AbstractEventParser的构造函数中
             flushCallback.flush(transaction);
             flushSequence.set(end);// flush成功后，更新flush位置
         }

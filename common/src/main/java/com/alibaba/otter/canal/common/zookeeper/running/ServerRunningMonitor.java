@@ -80,6 +80,7 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
         processStart();
     }
 
+    @Override
     public synchronized void start() {
         super.start();
         try {
@@ -133,16 +134,7 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
         }
     }
 
-    public boolean release() {
-        if (zkClient != null) {
-            releaseRunning(); // 尝试一下release
-            return true;
-        } else {
-            processActiveExit(); // 没有zk，直接退出
-            return false;
-        }
-    }
-
+    @Override
     public synchronized void stop() {
         super.stop();
 
@@ -155,6 +147,16 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
             processActiveExit(); // 没有zk，直接启动
         }
         processStop();
+    }
+
+    public boolean release() {
+        if (zkClient != null) {
+            releaseRunning(); // 尝试一下release
+            return true;
+        } else {
+            processActiveExit(); // 没有zk，直接退出
+            return false;
+        }
     }
 
     /**

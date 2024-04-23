@@ -178,6 +178,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         super.stop();
     }
 
+    @Override
     public boolean publish(LogBuffer buffer) {
         return this.publish(buffer, null);
     }
@@ -185,6 +186,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     /**
      * 网络数据投递
      */
+    @Override
     public boolean publish(LogEvent event) {
         return this.publish(null, event);
     }
@@ -259,7 +261,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     }
 
     /**
-     * 一阶段简单解析
+     * 一阶段简单解析：即解析dml语句涉及到的表元数据信息
      * */
     private class SimpleParserStage implements EventHandler<MessageEvent>, LifecycleAware {
         private LogDecoder decoder;
@@ -272,13 +274,14 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
             }
         }
 
+        @Override
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
             try {
-                // 解析LogBuffer为LogEvent并设置进MessageEvent中供后续处理阶段处理数据
+                // 1. 解析LogBuffer为LogEvent并设置进MessageEvent中供后续处理阶段处理数据
                 LogEvent logEvent = event.getEvent();
                 if (logEvent == null) {
                     LogBuffer buffer = event.getBuffer();
-                    // 解码LogBuffer为LogEvent对象
+                    // 1.1 解码LogBuffer为LogEvent对象
                     logEvent = decoder.decode(buffer, context);
                     event.setEvent(logEvent);
                 }
@@ -359,6 +362,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                             entry = logEventConvert.parseRowsEvent((RowsLogEvent) event.getEvent(), event.getTable());
                     }
 
+                    // 将解析出的entry数据设置进MysqlEvent的entry中，继续下一阶段处理
                     event.setEntry(entry);
                 }
             } catch (Throwable e) {
@@ -378,22 +382,27 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         }
     }
 
+    /**
+     * 接收来自DmlParserStage平台解析后的数据，主要负责数据的存储，将MessageEvent中的数据存入transactionBuffer中
+     * */
     private class SinkStoreStage implements EventHandler<MessageEvent>, LifecycleAware {
 
+        @Override
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
             try {
                 if (event.getEntry() != null) {
+                    // 将数据存储进transactionBuffer
                     transactionBuffer.add(event.getEntry());
                 }
 
                 LogEvent logEvent = event.getEvent();
                 if (connection instanceof MysqlConnection && logEvent.getSemival() == 1) {
                     // semi ack回报
-                    ((MysqlConnection) connection).sendSemiAck(logEvent.getHeader().getLogFileName(),
-                        logEvent.getHeader().getLogPos());
+                    ((MysqlConnection) connection).sendSemiAck(logEvent.getHeader().getLogFileName(), logEvent.getHeader().getLogPos());
                 }
 
-                // clear for gc
+                // clear for gc 最后一阶段binlog数据处理完成，清空当前解析的dml数据所占用的RingBuffer环形数组中对应的索引对象中的属性，
+                // 用于存入下次待解析的数据
                 event.setBuffer(null);
                 event.setEvent(null);
                 event.setTable(null);

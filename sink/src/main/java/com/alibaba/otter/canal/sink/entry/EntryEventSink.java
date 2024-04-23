@@ -50,14 +50,13 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         addHandler(new HeartBeatEntryEventHandler());
     }
 
+    @Override
     public void start() {
         super.start();
         Assert.notNull(eventStore);
-
         if (eventStore instanceof MemoryEventStoreWithBuffer) {
             this.raw = ((MemoryEventStoreWithBuffer) eventStore).isRaw();
         }
-
         for (CanalEventDownStreamHandler handler : getHandlers()) {
             if (!handler.isStart()) {
                 handler.start();
@@ -65,6 +64,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         }
     }
 
+    @Override
     public void stop() {
         super.stop();
 
@@ -80,14 +80,14 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         return false;
     }
 
+    @Override
     public boolean sink(List<CanalEntry.Entry> entrys, InetSocketAddress remoteAddress, String destination)
                                                                                                            throws CanalSinkException,
                                                                                                            InterruptedException {
         return sinkData(entrys, remoteAddress);
     }
 
-    private boolean sinkData(List<CanalEntry.Entry> entrys, InetSocketAddress remoteAddress)
-                                                                                            throws InterruptedException {
+    private boolean sinkData(List<CanalEntry.Entry> entrys, InetSocketAddress remoteAddress) throws InterruptedException {
         boolean hasRowData = false;
         boolean hasHeartBeat = false;
         List<Event> events = new ArrayList<>();
@@ -96,8 +96,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
                 continue;
             }
 
-            if (filterTransactionEntry
-                && (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND)) {
+            if (filterTransactionEntry && (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND)) {
                 long currentTimestamp = entry.getHeader().getExecuteTime();
                 // 基于一定的策略控制，放过空的事务头和尾，便于及时更新数据库位点，表明工作正常
                 if (lastTransactionCount.incrementAndGet() <= emptyTransctionThresold

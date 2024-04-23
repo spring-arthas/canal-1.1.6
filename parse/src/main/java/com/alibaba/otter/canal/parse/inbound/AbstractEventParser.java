@@ -135,19 +135,38 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         });
     }
 
+    protected boolean consumeTheEventAndProfilingIfNecessary(List<CanalEntry.Entry> entrys) throws CanalSinkException, InterruptedException {
+        long startTs = -1;
+        boolean enabled = getProfilingEnabled();
+        if (enabled) {
+            startTs = System.currentTimeMillis();
+        }
+        boolean result = eventSink.sink(entrys, (runningInfo == null) ? null : runningInfo.getAddress(), destination);
+        if (enabled) {
+            this.processingInterval = System.currentTimeMillis() - startTs;
+        }
+        if (consumedEventCount.incrementAndGet() < 0) {
+            consumedEventCount.set(0);
+        }
+
+        return result;
+    }
+
+    @Override
     public void start() {
         super.start();
         MDC.put("destination", destination);
         // 1. 配置transaction buffer，初始化缓冲队列， 后续分析
         transactionBuffer.setBufferSize(transactionSize);// 设置buffer大小
         transactionBuffer.start();
-        // 2. 构造bin log parser 解析器，该解析器负责解析Mysql binlog
+        // 2. 构造bin log parser 解析器，该解析器负责解析Mysql binlog，即创建的为LogEventConvert
         binlogParser = buildParser();// 初始化一下BinLogParser
         binlogParser.start();
 
         // 3. 启动解析工作线程：构建mysql连接并建立连接 + 注册slave + 寻找位点 + 开始dump数据
         parseThread = new Thread(new Runnable() {
 
+            @Override
             public void run() {
                 MDC.put("destination", String.valueOf(destination));
                 ErosaConnection erosaConnection = null;
@@ -187,6 +206,7 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
                         erosaConnection.reconnect();
                         final SinkFunction sinkHandler = new SinkFunction<EVENT>() {
                             private LogPosition lastPosition;
+                            @Override
                             public boolean sink(EVENT event) {
                                 try {
                                     CanalEntry.Entry entry = parseAndProfilingIfNecessary(event, false);
@@ -319,6 +339,7 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         parseThread.start();
     }
 
+    @Override
     public void stop() {
         super.stop();
 
@@ -346,27 +367,6 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         if (transactionBuffer.isStart()) {
             transactionBuffer.stop();
         }
-    }
-
-    protected boolean consumeTheEventAndProfilingIfNecessary(List<CanalEntry.Entry> entrys)
-        throws CanalSinkException, InterruptedException {
-        long startTs = -1;
-        boolean enabled = getProfilingEnabled();
-        if (enabled) {
-            startTs = System.currentTimeMillis();
-        }
-
-        boolean result = eventSink.sink(entrys, (runningInfo == null) ? null : runningInfo.getAddress(), destination);
-
-        if (enabled) {
-            this.processingInterval = System.currentTimeMillis() - startTs;
-        }
-
-        if (consumedEventCount.incrementAndGet() < 0) {
-            consumedEventCount.set(0);
-        }
-
-        return result;
     }
 
     protected CanalEntry.Entry parseAndProfilingIfNecessary(EVENT bod, boolean isSeek) throws Exception {

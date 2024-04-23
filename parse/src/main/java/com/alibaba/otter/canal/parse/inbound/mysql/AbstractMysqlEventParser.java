@@ -1,6 +1,7 @@
 package com.alibaba.otter.canal.parse.inbound.mysql;
 
 import java.nio.charset.Charset;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.alibaba.otter.canal.filter.CanalEventFilter;
@@ -44,19 +45,22 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
     protected final AtomicLong     receivedBinlogBytes       = new AtomicLong(0L);
     private final AtomicLong       eventsPublishBlockingTime = new AtomicLong(0L);
 
+    /**
+     * 构建binlog日志解析器【LogEventConvert】
+     * */
+    @Override
     protected BinlogParser buildParser() {
         LogEventConvert convert = new LogEventConvert();
-        if (eventFilter != null && eventFilter instanceof AviaterRegexFilter) {
+        if (Objects.nonNull(eventFilter) && eventFilter instanceof AviaterRegexFilter) {
+            // 设置常规需要处理的库表配置，即库表白名单
             convert.setNameFilter((AviaterRegexFilter) eventFilter);
         }
-
         if (eventBlackFilter != null && eventBlackFilter instanceof AviaterRegexFilter) {
+            // 设置常规不需要处理的库表配置，即库表黑名单
             convert.setNameBlackFilter((AviaterRegexFilter) eventBlackFilter);
         }
-
         convert.setFieldFilterMap(getFieldFilterMap());
         convert.setFieldBlackFilterMap(getFieldBlackFilterMap());
-
         convert.setCharset(connectionCharset);
         convert.setFilterQueryDcl(filterQueryDcl);
         convert.setFilterQueryDml(filterQueryDml);
@@ -67,9 +71,12 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
         return convert;
     }
 
+    @Override
     protected MultiStageCoprocessor buildMultiStageCoprocessor() {
         MysqlMultiStageCoprocessor mysqlMultiStageCoprocessor = new MysqlMultiStageCoprocessor(parallelBufferSize,
             parallelThreadSize,
+            // binlogParser = LogEventConvert，该参数来自本类的父类AbstractEventParser的start()方法中进行创建，传入该参数用于
+            // MysqlMultiStageCoprocessor进行解析动作
             (LogEventConvert) binlogParser,
             transactionBuffer,
             destination,
@@ -80,7 +87,57 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
         return mysqlMultiStageCoprocessor;
     }
 
+    /**
+     * 回滚到指定位点
+     * @param position
+     * @return
+     */
+    @Override
+    protected boolean processTableMeta(EntryPosition position) {
+        if (tableMetaTSDB != null) {
+            if (position.getTimestamp() == null || position.getTimestamp() <= 0) {
+                throw new CanalParseException("use gtid and TableMeta TSDB should be config timestamp > 0");
+            }
 
+            return tableMetaTSDB.rollback(position);
+        }
+
+        return true;
+    }
+
+    @Override
+    public void start() throws CanalParseException {
+        if (enableTsdb) {
+            if (tableMetaTSDB == null) {
+                synchronized (CanalEventParser.class) {
+                    try {
+                        // 设置当前正在加载的通道，加载spring查找文件时会用到该变量
+                        System.setProperty("canal.instance.destination", destination);
+                        // 初始化
+                        tableMetaTSDB = tableMetaTSDBFactory.build(destination, tsdbSpringXml);
+                    } finally {
+                        System.setProperty("canal.instance.destination", "");
+                    }
+                }
+            }
+        }
+
+        super.start();
+    }
+
+    @Override
+    public void stop() throws CanalParseException {
+        if (enableTsdb) {
+            tableMetaTSDBFactory.destory(destination);
+            tableMetaTSDB = null;
+        }
+
+        super.stop();
+    }
+
+    // ============================ setter / getter =========================
+
+    @Override
     public void setEventFilter(CanalEventFilter eventFilter) {
         super.setEventFilter(eventFilter);
 
@@ -96,6 +153,7 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
         }
     }
 
+    @Override
     public void setEventBlackFilter(CanalEventFilter eventBlackFilter) {
         super.setEventBlackFilter(eventBlackFilter);
 
@@ -138,54 +196,6 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
             ((DatabaseTableMeta) tableMetaTSDB).setFieldBlackFilterMap(getFieldBlackFilterMap());
         }
     }
-
-    /**
-     * 回滚到指定位点
-     * 
-     * @param position
-     * @return
-     */
-    protected boolean processTableMeta(EntryPosition position) {
-        if (tableMetaTSDB != null) {
-            if (position.getTimestamp() == null || position.getTimestamp() <= 0) {
-                throw new CanalParseException("use gtid and TableMeta TSDB should be config timestamp > 0");
-            }
-
-            return tableMetaTSDB.rollback(position);
-        }
-
-        return true;
-    }
-
-    public void start() throws CanalParseException {
-        if (enableTsdb) {
-            if (tableMetaTSDB == null) {
-                synchronized (CanalEventParser.class) {
-                    try {
-                        // 设置当前正在加载的通道，加载spring查找文件时会用到该变量
-                        System.setProperty("canal.instance.destination", destination);
-                        // 初始化
-                        tableMetaTSDB = tableMetaTSDBFactory.build(destination, tsdbSpringXml);
-                    } finally {
-                        System.setProperty("canal.instance.destination", "");
-                    }
-                }
-            }
-        }
-
-        super.start();
-    }
-
-    public void stop() throws CanalParseException {
-        if (enableTsdb) {
-            tableMetaTSDBFactory.destory(destination);
-            tableMetaTSDB = null;
-        }
-
-        super.stop();
-    }
-
-    // ============================ setter / getter =========================
 
     public void setConnectionCharsetNumber(byte connectionCharsetNumber) {
         this.connectionCharsetNumber = connectionCharsetNumber;

@@ -34,6 +34,7 @@ public class GroupEventSink extends EntryEventSink {
         this.groupSize = groupSize;
     }
 
+    @Override
     public void start() {
         super.start();
 

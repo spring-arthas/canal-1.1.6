@@ -76,6 +76,7 @@ public class LocalBinlogEventParser extends AbstractMysqlEventParser implements 
         }
     }
 
+    @Override
     public void start() throws CanalParseException {
         if (runningInfo == null) { // 第一次链接主库
             runningInfo = masterInfo;

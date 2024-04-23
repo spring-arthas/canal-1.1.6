@@ -72,12 +72,13 @@
 		<property name="alarmHandler" ref="alarmHandler" />
 
 		<!-- 解析过滤处理 -->
+		<!-- 该eventFilter来源【instance.properties】文件中的【canal.instance.filter.regex】配置 -->
 		<property name="eventFilter">
 			<bean class="com.alibaba.otter.canal.filter.aviater.AviaterRegexFilter" >
 				<constructor-arg index="0" value="${canal.instance.filter.regex:.*\..*}" />
 			</bean>
 		</property>
-
+		<!-- 该eventFilter来源【instance.properties】文件中的【canal.instance.filter.black.regex】配置 -->
 		<property name="eventBlackFilter">
 			<bean class="com.alibaba.otter.canal.filter.aviater.AviaterRegexFilter" >
 				<constructor-arg index="0" value="${canal.instance.filter.black.regex:}" />

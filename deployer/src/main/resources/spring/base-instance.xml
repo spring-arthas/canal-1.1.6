@@ -21,7 +21,6 @@
 			</list>
 		</property>
 	</bean>
-	
 	<bean id="socketAddressEditor" class="com.alibaba.otter.canal.instance.spring.support.SocketAddressEditor" />
 	<bean class="org.springframework.beans.factory.config.CustomEditorConfigurer"> 
 		<property name="propertyEditorRegistrars">
@@ -30,7 +29,6 @@
 			</list>
 		</property>
 	</bean>
-	
 	<bean id="baseEventParser" class="com.alibaba.otter.canal.parse.inbound.mysql.rds.RdsBinlogEventParserProxy" abstract="true">
 		<property name="accesskey" value="${canal.aliyun.accesskey:}" />
 		<property name="secretkey" value="${canal.aliyun.secretkey:}" />
