@@ -161,6 +161,7 @@ public class MemoryEventStoreWithBuffer extends AbstractCanalStoreScavenge imple
             return true;
         }
 
+        // 加锁控制数据放入，此处加锁就是为了协调CanalMQStarter从该EventStore消费数据
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
@@ -240,7 +241,7 @@ public class MemoryEventStoreWithBuffer extends AbstractCanalStoreScavenge imple
 
     @Override
     public Events<Event> get(Position start, int batchSize, long timeout, TimeUnit unit) throws InterruptedException,
-                                                                                        CanalStoreException {
+        CanalStoreException {
         long nanos = unit.toNanos(timeout);
         final ReentrantLock lock = this.lock;
         lock.lockInterruptibly();

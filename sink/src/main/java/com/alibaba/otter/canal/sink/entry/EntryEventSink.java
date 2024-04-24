@@ -30,7 +30,6 @@ import com.alibaba.otter.canal.store.model.Event;
  * @version 1.0.0
  */
 public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry>> implements CanalEventSink<List<CanalEntry.Entry>> {
-
     private static final Logger    logger                        = LoggerFactory.getLogger(EntryEventSink.class);
     private static final int       maxFullTimes                  = 10;
     private CanalEventStore<Event> eventStore;
@@ -76,7 +75,6 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
     }
 
     public boolean filter(List<Entry> event, InetSocketAddress remoteAddress, String destination) {
-
         return false;
     }
 
@@ -114,6 +112,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
 
             hasRowData |= (entry.getEntryType() == EntryType.ROWDATA);
             hasHeartBeat |= (entry.getEntryType() == EntryType.HEARTBEAT);
+            // entry数据封装进Event，并添加至events数组
             Event event = new Event(new LogIdentity(remoteAddress, -1L), entry, raw);
             events.add(event);
         }
@@ -140,12 +139,15 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
     }
 
     protected boolean doSink(List<Event> events) {
+        // 1. sink前的 前置处理
         for (CanalEventDownStreamHandler<List<Event>> handler : getHandlers()) {
             events = handler.before(events);
         }
         long blockingStart = 0L;
         int fullTimes = 0;
         do {
+            // 2. events数据存入eventStore，此处尝试放入，有可能存在eventStores中的数组已满导致无法放入本次events数据，那么就进行当前
+            // 线程阻塞等待，详见else逻辑代码
             if (eventStore.tryPut(events)) {
                 if (fullTimes > 0) {
                     eventsSinkBlockingTime.addAndGet(System.nanoTime() - blockingStart);

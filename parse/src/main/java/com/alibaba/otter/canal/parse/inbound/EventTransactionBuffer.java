@@ -23,6 +23,9 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
     private int                      bufferSize    = 1024;
     private int                      indexMask;
     private CanalEntry.Entry[]       entries;
+    /**
+     * 关于putSequence和flushSequence，由于数组是循环使用，且大小为1024，可以得出，putSequence理应大于flushSequence
+     * */
     private AtomicLong               putSequence   = new AtomicLong(INIT_SQEUENCE); // 代表当前put操作最后一次写操作发生的位置
     private AtomicLong               flushSequence = new AtomicLong(INIT_SQEUENCE); // 代表满足flush条件后最后一次数据flush的时间
     private TransactionFlushCallback flushCallback;
@@ -90,19 +93,16 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         }
     }
 
-    public void reset() {
-        putSequence.set(INIT_SQEUENCE);
-        flushSequence.set(INIT_SQEUENCE);
-    }
-
     private void put(CanalEntry.Entry data) throws InterruptedException {
-        // 首先检查是否有空位
+        // 1. 首先获取一个数组索引位置，putSequence.get()为上次已经放入数据的索引位置，本次放入时，先获取要放入位置是否允许放入，即调用
+        // checkFreeSlotAt()方法进行判断
         if (checkFreeSlotAt(putSequence.get() + 1)) {
             long current = putSequence.get();
             long next = current + 1;
 
             // 先写数据，再更新对应的cursor,并发度高的情况，putSequence会被get请求可见，拿出了ringbuffer中的老的Entry值
             entries[getIndex(next)] = data;
+            // putSequence放入的索引未知会一直保持自增，且最终会超过bufferSize = 1024，其初始值为-1
             putSequence.set(next);
         } else {
             flush();// buffer区满了，刷新一下
@@ -110,25 +110,9 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         }
     }
 
-    private void flush() throws InterruptedException {
-        long start = this.flushSequence.get() + 1;
-        long end = this.putSequence.get();
-
-        if (start <= end) {
-            List<CanalEntry.Entry> transaction = new ArrayList<>();
-            for (long next = start; next <= end; next++) {
-                transaction.add(this.entries[getIndex(next)]);
-            }
-
-            // 通过flushCallback开始消费数据，数据来自【MysqlMultiStageCoprocessor】最后一阶段【SinkStoreStage】中的transactionBuffer.add(event.getEntry())
-            // flushCallback定义在AbstractEventParser的构造函数中
-            flushCallback.flush(transaction);
-            flushSequence.set(end);// flush成功后，更新flush位置
-        }
-    }
-
     /**
      * 查询是否有空位
+     * @param sequence 当前所要校验的位置索引序号
      */
     private boolean checkFreeSlotAt(final long sequence) {
         final long wrapPoint = sequence - bufferSize;
@@ -137,6 +121,33 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         } else {
             return true;
         }
+    }
+
+    private void flush() throws InterruptedException {
+        // flushSequence 和 putSequence 均从-1开始计算，所以刷新数据时，flushSequence得到的待刷新的索引位置是必须要小于等于putSequence
+        // 索引未知，即是一种我要先put放数据，才能flush数据
+        long start = this.flushSequence.get() + 1;
+        long end = this.putSequence.get();
+
+        // 待刷新的位置 小于等于 已经放入元素的索引未知，即可执行刷新索引位置数据操作
+        if (start <= end) {
+            // 收集 start 到 end 之间的数据，并放入canalEntrys中，即该数据最终是用于mq消费的
+            List<CanalEntry.Entry> canalEntrys = new ArrayList<>();
+            for (long next = start; next <= end; next++) {
+                // getIndex(next)方法通过next与数组长度取模保证索引位置用于介于0～1024之间，保证能够获取到正确位置的元素
+                canalEntrys.add(this.entries[getIndex(next)]);
+            }
+
+            // 通过flushCallback开始消费数据，数据来自【MysqlMultiStageCoprocessor】最后一阶段【SinkStoreStage】中的transactionBuffer.add(event.getEntry())
+            // flushCallback定义在AbstractEventParser的构造函数中, 通过该回调函数flush()方法将数据推入EntryEventSink中
+            flushCallback.flush(canalEntrys);
+            flushSequence.set(end);// flush成功后，更新flush位置为最新已经刷新可被消费的位置
+        }
+    }
+
+    public void reset() {
+        putSequence.set(INIT_SQEUENCE);
+        flushSequence.set(INIT_SQEUENCE);
     }
 
     private int getIndex(long sequcnce) {

@@ -118,17 +118,16 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
 
     public AbstractEventParser(){
         // 初始化一下
-        transactionBuffer = new EventTransactionBuffer(transaction -> {
-            boolean successed = consumeTheEventAndProfilingIfNecessary(transaction);
+        transactionBuffer = new EventTransactionBuffer(canalEntrys -> {
+            boolean successed = consumeTheEventAndProfilingIfNecessary(canalEntrys);
             if (!running) {
                 return;
             }
-
             if (!successed) {
                 throw new CanalParseException("consume failed!");
             }
 
-            LogPosition position = buildLastTransactionPosition(transaction);
+            LogPosition position = buildLastTransactionPosition(canalEntrys);
             if (position != null) { // 可能position为空
                 logPositionManager.persistLogPosition(AbstractEventParser.this.destination, position);
             }
@@ -148,7 +147,6 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         if (consumedEventCount.incrementAndGet() < 0) {
             consumedEventCount.set(0);
         }
-
         return result;
     }
 
