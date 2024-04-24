@@ -10,7 +10,6 @@ import com.alibaba.otter.canal.filter.CanalEventFilter;
  * @author jianghang 2012-7-23 下午01:02:45
  */
 public abstract class AbstractCanalEventSink<T> extends AbstractCanalLifeCycle implements CanalEventSink<T> {
-
     protected CanalEventFilter                  filter;
     protected List<CanalEventDownStreamHandler> handlers = new ArrayList<>();
 
@@ -46,6 +45,7 @@ public abstract class AbstractCanalEventSink<T> extends AbstractCanalLifeCycle i
         return handlers;
     }
 
+    @Override
     public void interrupt() {
         // do nothing
     }

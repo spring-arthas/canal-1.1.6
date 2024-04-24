@@ -117,7 +117,7 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
     }
 
     public AbstractEventParser(){
-        // 初始化一下
+        // 中转透传binlog解析后的数据
         transactionBuffer = new EventTransactionBuffer(canalEntrys -> {
             boolean successed = consumeTheEventAndProfilingIfNecessary(canalEntrys);
             if (!running) {
@@ -140,6 +140,8 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         if (enabled) {
             startTs = System.currentTimeMillis();
         }
+
+        // eventSink = EntryEventSink
         boolean result = eventSink.sink(entrys, (runningInfo == null) ? null : runningInfo.getAddress(), destination);
         if (enabled) {
             this.processingInterval = System.currentTimeMillis() - startTs;

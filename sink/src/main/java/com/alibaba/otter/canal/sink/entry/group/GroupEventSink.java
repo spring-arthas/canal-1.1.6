@@ -68,6 +68,7 @@ public class GroupEventSink extends EntryEventSink {
         return false;
     }
 
+    @Override
     public void interrupt() {
         super.interrupt();
         barrier.interrupt();

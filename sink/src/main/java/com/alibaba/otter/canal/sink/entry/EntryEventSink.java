@@ -37,7 +37,6 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
     protected boolean              filterEmtryTransactionEntry   = true;                                         // 是否需要过滤空的事务头/尾
     protected long                 emptyTransactionInterval      = 5 * 1000;                                     // 空的事务输出的频率
     protected long                 emptyTransctionThresold       = 8192;                                         // 超过8192个事务头，输出一个
-
     protected volatile long        lastTransactionTimestamp      = 0L;
     protected AtomicLong           lastTransactionCount          = new AtomicLong(0L);
     protected volatile long        lastEmptyTransactionTimestamp = 0L;
@@ -138,6 +137,20 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         }
     }
 
+    protected boolean doFilter(CanalEntry.Entry entry) {
+        if (filter != null && entry.getEntryType() == EntryType.ROWDATA) {
+            String name = getSchemaNameAndTableName(entry);
+            boolean need = filter.filter(name);
+            if (!need) {
+                logger.debug("filter name[{}] entry : {}:{}", name, entry.getHeader().getLogfileName(), entry.getHeader().getLogfileOffset());
+            }
+
+            return need;
+        } else {
+            return true;
+        }
+    }
+
     protected boolean doSink(List<Event> events) {
         // 1. sink前的 前置处理
         for (CanalEventDownStreamHandler<List<Event>> handler : getHandlers()) {
@@ -174,23 +187,6 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
 
         } while (running && !Thread.interrupted());
         return false;
-    }
-
-    protected boolean doFilter(CanalEntry.Entry entry) {
-        if (filter != null && entry.getEntryType() == EntryType.ROWDATA) {
-            String name = getSchemaNameAndTableName(entry);
-            boolean need = filter.filter(name);
-            if (!need) {
-                logger.debug("filter name[{}] entry : {}:{}",
-                    name,
-                    entry.getHeader().getLogfileName(),
-                    entry.getHeader().getLogfileOffset());
-            }
-
-            return need;
-        } else {
-            return true;
-        }
     }
 
     // 处理无数据的情况，避免空循环挂死
