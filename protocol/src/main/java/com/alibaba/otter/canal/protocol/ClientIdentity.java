@@ -12,7 +12,6 @@ import com.alibaba.otter.canal.common.utils.CanalToStringStyle;
  * @version 1.0.0
  */
 public class ClientIdentity implements Serializable {
-
     private static final long serialVersionUID = -8262100681930834834L;
     private String            destination;
     private short             clientId;

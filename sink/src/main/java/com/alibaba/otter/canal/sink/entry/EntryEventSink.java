@@ -89,10 +89,12 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         boolean hasHeartBeat = false;
         List<Event> events = new ArrayList<>();
         for (CanalEntry.Entry entry : entrys) {
+            // 1. 执行entry数据过滤，不在filter中的库表则会被continue
             if (!doFilter(entry)) {
                 continue;
             }
 
+            // 2. 处理空事务场景
             if (filterTransactionEntry && (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND)) {
                 long currentTimestamp = entry.getHeader().getExecuteTime();
                 // 基于一定的策略控制，放过空的事务头和尾，便于及时更新数据库位点，表明工作正常
@@ -111,7 +113,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
 
             hasRowData |= (entry.getEntryType() == EntryType.ROWDATA);
             hasHeartBeat |= (entry.getEntryType() == EntryType.HEARTBEAT);
-            // entry数据封装进Event，并添加至events数组
+            // entry数据构建Event，并添加至events数组
             Event event = new Event(new LogIdentity(remoteAddress, -1L), entry, raw);
             events.add(event);
         }
@@ -138,9 +140,9 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
     }
 
     protected boolean doFilter(CanalEntry.Entry entry) {
-        if (filter != null && entry.getEntryType() == EntryType.ROWDATA) {
+        if (this.filter != null && entry.getEntryType() == EntryType.ROWDATA) {
             String name = getSchemaNameAndTableName(entry);
-            boolean need = filter.filter(name);
+            boolean need = this.filter.filter(name);
             if (!need) {
                 logger.debug("filter name[{}] entry : {}:{}", name, entry.getHeader().getLogfileName(), entry.getHeader().getLogfileOffset());
             }

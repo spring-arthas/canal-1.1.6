@@ -18,7 +18,6 @@ import com.alibaba.otter.canal.store.CanalStoreException;
  * @version 1.0.0
  */
 public class EventTransactionBuffer extends AbstractCanalLifeCycle {
-
     private static final long        INIT_SQEUENCE = -1;
     private int                      bufferSize    = 1024;
     private int                      indexMask;

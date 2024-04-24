@@ -25,7 +25,9 @@ public class LogBuffer {
     }
 
     public LogBuffer(byte[] buffer, final int origin, final int limit){
-        if (origin + limit > buffer.length) throw new IllegalArgumentException("capacity excceed: " + (origin + limit));
+        if (origin + limit > buffer.length) {
+            throw new IllegalArgumentException("capacity excceed: " + (origin + limit));
+        }
 
         this.buffer = buffer;
         this.origin = origin;

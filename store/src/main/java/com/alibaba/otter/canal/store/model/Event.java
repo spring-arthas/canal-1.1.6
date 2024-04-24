@@ -18,12 +18,9 @@ import com.google.protobuf.ByteString;
  * @author jianghang 2012-7-13 下午03:03:03
  */
 public class Event implements Serializable {
-
     private static final long serialVersionUID = 1333330351758762739L;
-
     private LogIdentity       logIdentity;                            // 记录数据产生的来源
     private ByteString        rawEntry;
-
     private long              executeTime;
     private EntryType         entryType;
     private String            journalName;

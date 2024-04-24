@@ -282,7 +282,6 @@ public class MemoryEventStoreWithBuffer extends AbstractCanalStoreScavenge imple
 
     private Events<Event> doGet(Position start, int batchSize) throws CanalStoreException {
         LogPosition startPosition = (LogPosition) start;
-
         long current = getSequence.get();
         long maxAbleSequence = putSequence.get();
         long next = current;
@@ -291,7 +290,6 @@ public class MemoryEventStoreWithBuffer extends AbstractCanalStoreScavenge imple
         if (startPosition == null || !startPosition.getPostion().isIncluded()) { // 第一次订阅之后，需要包含一下start位置，防止丢失第一条记录
             next = next + 1;
         }
-
         if (current >= maxAbleSequence) {
             return new Events<>();
         }
