@@ -139,23 +139,6 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
         }
     }
 
-    protected boolean doFilter(CanalEntry.Entry entry) {
-        if (filter != null && entry.getEntryType() == EntryType.ROWDATA) {
-            String name = getSchemaNameAndTableName(entry);
-            boolean need = filter.filter(name);
-            if (!need) {
-                logger.debug("filter name[{}] entry : {}:{}",
-                    name,
-                    entry.getHeader().getLogfileName(),
-                    entry.getHeader().getLogfileOffset());
-            }
-
-            return need;
-        } else {
-            return true;
-        }
-    }
-
     protected boolean doSink(List<Event> events) {
         for (CanalEventDownStreamHandler<List<Event>> handler : getHandlers()) {
             events = handler.before(events);
@@ -189,6 +172,23 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
 
         } while (running && !Thread.interrupted());
         return false;
+    }
+
+    protected boolean doFilter(CanalEntry.Entry entry) {
+        if (filter != null && entry.getEntryType() == EntryType.ROWDATA) {
+            String name = getSchemaNameAndTableName(entry);
+            boolean need = filter.filter(name);
+            if (!need) {
+                logger.debug("filter name[{}] entry : {}:{}",
+                    name,
+                    entry.getHeader().getLogfileName(),
+                    entry.getHeader().getLogfileOffset());
+            }
+
+            return need;
+        } else {
+            return true;
+        }
     }
 
     // 处理无数据的情况，避免空循环挂死
