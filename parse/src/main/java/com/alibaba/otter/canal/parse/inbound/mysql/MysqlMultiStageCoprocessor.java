@@ -477,6 +477,9 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
 
     }
 
+    /**
+     * canal disruptor binlog消费者线程公共异常处理器
+     * */
     static class SimpleFatalExceptionHandler implements ExceptionHandler {
 
         @Override
