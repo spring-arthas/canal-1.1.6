@@ -426,7 +426,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     }
 
     /**
-     * disruptor环形队列数组中的缓存对象
+     * disruptor环形队列数组RingBuffer中的缓存对象，接收解析出来的binlog buffer数据
      * */
     static class MessageEvent {
         private LogBuffer        buffer;
@@ -478,7 +478,8 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     }
 
     /**
-     * canal disruptor binlog消费者线程公共异常处理器
+     * canal disruptor binlog消费者线程公共异常处理器，适配【SimpleParserStage】、【DmlParserStage】、【SinkStoreStage】解析异常
+     * 时的公共处理
      * */
     static class SimpleFatalExceptionHandler implements ExceptionHandler {
 

@@ -12,6 +12,7 @@
 
 	<import resource="classpath:spring/base-instance.xml" />
 
+	<!-- canal实例Bean对象 -->
 	<bean id="instance" class="com.alibaba.otter.canal.instance.spring.CanalInstanceWithSpring">
 		<property name="destination" value="${canal.instance.destination}" />
 		<property name="eventParser">
@@ -34,14 +35,16 @@
         </property>
 	</bean>
 
-	<!-- 报警处理类 -->
+	<!-- 日志告警处理类 -->
 	<bean id="alarmHandler" class="com.alibaba.otter.canal.common.alarm.LogAlarmHandler" />
 
+	<!-- 元数据管理类, 托管binlog位点 -->
 	<bean id="metaManager" class="com.alibaba.otter.canal.meta.FileMixedMetaManager">
 		<property name="dataDir" value="${canal.file.data.dir:../conf}" />
 		<property name="period" value="${canal.file.flush.period:1000}" />
 	</bean>
 
+	<!-- binlog数据存储Bean -->
 	<bean id="eventStore" class="com.alibaba.otter.canal.store.memory.MemoryEventStoreWithBuffer">
 		<property name="bufferSize" value="${canal.instance.memory.buffer.size:16384}" />
 		<property name="bufferMemUnit" value="${canal.instance.memory.buffer.memunit:1024}" />
@@ -50,11 +53,13 @@
 		<property name="raw" value="${canal.instance.memory.rawEntry:true}" />
 	</bean>
 
+	<!-- binlog数据 -->
 	<bean id="eventSink" class="com.alibaba.otter.canal.sink.entry.EntryEventSink">
 		<property name="eventStore" ref="eventStore" />
 		<property name="filterTransactionEntry" value="${canal.instance.filter.transaction.entry:false}"/>
 	</bean>
 
+	<!-- binlog数据解析Bean -->
 	<bean id="eventParser" parent="baseEventParser">
 		<property name="destination" value="${canal.instance.destination}" />
 		<property name="slaveId" value="${canal.instance.mysql.slaveId:0}" />
@@ -104,9 +109,11 @@
 		<!-- 解析位点记录 -->
 		<property name="logPositionManager">
 			<bean class="com.alibaba.otter.canal.parse.index.FailbackLogPositionManager">
+				<!-- 基于内存的日志位点管理器 -->
 				<constructor-arg>
 					<bean class="com.alibaba.otter.canal.parse.index.MemoryLogPositionManager" />
 				</constructor-arg>
+				<!-- 基于meta.dat文件的日志位点管理器 -->
 				<constructor-arg>
 					<bean class="com.alibaba.otter.canal.parse.index.MetaLogPositionManager">
 						<constructor-arg ref="metaManager"/>

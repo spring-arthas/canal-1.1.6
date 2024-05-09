@@ -70,6 +70,7 @@ public class CanalMQStarter {
                 executorService.execute(canalMQRunnable);
             }
 
+            // 3. 配置优雅销毁机制，当JVM停止时会执行
             running = true;
             logger.info("## the MQ workers is running now ......");
             shutdownThread = new Thread(() -> {
@@ -211,8 +212,8 @@ public class CanalMQStarter {
                     try {
                         int size = message.isRaw() ? message.getRawEntries().size() : message.getEntries().size();
                         if (batchId != -1 && size != 0) {
+                            // 向mq发送消息，发送完成后响应给生产者后执行commit回调，用于当前destination对应到eventStore中的数据确认
                             canalMQProducer.send(canalDestination, message, new Callback() {
-
                                 @Override
                                 public void commit() {
                                     canalServer.ack(clientIdentity, batchId); // 提交确认

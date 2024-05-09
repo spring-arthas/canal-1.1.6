@@ -40,13 +40,11 @@ import com.google.common.collect.MigrateMap;
 
 /**
  * 嵌入式版本实现
- *
  * @author jianghang 2012-7-12 下午01:34:00
  * @author zebin.xuzb
  * @version 1.0.0
  */
 public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements CanalServer, CanalService {
-
     private static final Logger        logger  = LoggerFactory.getLogger(CanalServerWithEmbedded.class);
     private Map<String, CanalInstance> canalInstances;
     // private Map<ClientIdentity, Position> lastRollbackPostions;
@@ -55,7 +53,6 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
     private CanalMetricsService        metrics = NopCanalMetricsService.NOP;
     private String                     user;
     private String                     passwd;
-
     private static class SingletonHolder {
         private static final CanalServerWithEmbedded CANAL_SERVER_WITH_EMBEDDED = new CanalServerWithEmbedded();
     }
@@ -145,6 +142,28 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
         }
     }
 
+    /**
+     * 判断指定的destination实例解析是否开启
+     * @param destination
+     * */
+    public boolean isStart(String destination) {
+        return canalInstances.containsKey(destination) && canalInstances.get(destination).isStart();
+    }
+
+    /**
+     * 检查指定的destination实例解析是否开启
+     * @param destination
+     * */
+    private void checkStart(String destination) {
+        if (!isStart(destination)) {
+            throw new CanalServerException(String.format("destination:%s should start first", destination));
+        }
+    }
+
+    /**
+     * 停止指定的destination实例解析器
+     * @param destination
+     * */
     public void stop(String destination) {
         CanalInstance canalInstance = canalInstances.remove(destination);
         if (canalInstance != null) {
@@ -161,10 +180,6 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
                 }
             }
         }
-    }
-
-    public boolean isStart(String destination) {
-        return canalInstances.containsKey(destination) && canalInstances.get(destination).isStart();
     }
 
     /**
@@ -197,12 +212,6 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
 
         // 通知下订阅关系变化
         canalInstance.subscribeChange(clientIdentity);
-    }
-
-    private void checkStart(String destination) {
-        if (!isStart(destination)) {
-            throw new CanalServerException(String.format("destination:%s should start first", destination));
-        }
     }
 
     /**

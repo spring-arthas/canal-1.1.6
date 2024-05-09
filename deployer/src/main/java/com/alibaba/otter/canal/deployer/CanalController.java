@@ -309,19 +309,18 @@ public class CanalController {
             };
 
             instanceConfigMonitors = MigrateMap.makeComputingMap(mode -> {
-                int scanInterval = Integer.valueOf(getProperty(properties,
-                    CanalConstants.CANAL_AUTO_SCAN_INTERVAL,
-                    "5"));
+                // 6.1、获取实例配置监听器自动扫描时间间隔
+                int scanInterval = Integer.valueOf(getProperty(properties, CanalConstants.CANAL_AUTO_SCAN_INTERVAL, "5"));
                 if (mode.isSpring()) {
                     SpringInstanceConfigMonitor monitor = new SpringInstanceConfigMonitor();
                     monitor.setScanIntervalInSecond(scanInterval);
+                    // 监听器执行的动作，即当该监听器在间隔时间内检测到实例配置有变更后，通过该DefaultAction来执行变更后的动作
                     monitor.setDefaultAction(defaultAction);
                     // 设置conf目录，默认是user.dir + conf目录组成
                     String rootDir = getProperty(properties, CanalConstants.CANAL_CONF_DIR);
                     if (StringUtils.isEmpty(rootDir)) {
                         rootDir = "../conf";
                     }
-
                     if (StringUtils.equals("otter-canal", System.getProperty("appName"))) {
                         monitor.setRootConf(rootDir);
                     } else {
@@ -462,7 +461,7 @@ public class CanalController {
     }
 
     /**
-     * 根据管理端的地址构建PlainCanalConfigClient
+     * 根据管理端的地址构建PlainCanalConfigClient请求类
      * @param managerAddress 管理端地址
      * */
     private PlainCanalConfigClient getManagerClient(String managerAddress) {
@@ -497,8 +496,8 @@ public class CanalController {
      * CanalController控制器启动
      * */
     public void start() throws Throwable {
-        logger.info("## start the canal server[{}({}):{}]", ip, registerIp, port);
-        logger.info("=>【】");
+        logger.info("=>【canal控制器启动】start: 注册到zk上的ip和端口信息为 = {}", registerIp + ":" + port);
+
         // 1. 创建整个canal的工作节点，以配置的ip+port注册到zk中
         final String path = ZookeeperPathUtils.getCanalClusterNode(registerIp + ":" + port);
         initCid(path);
@@ -520,25 +519,30 @@ public class CanalController {
                 }
             });
         }
-        // 优先启动embeded服务，构建canal instance对应的实例bean对象创建器
-        embededCanalServer.start();
-        // 尝试启动一下非lazy状态的通道
+
+        // 2. 统计 + 创建实例生成托管Map
+        this.embededCanalServer.start();
+
+        // 3. 启动实例
         for (Map.Entry<String, InstanceConfig> entry : instanceConfigs.entrySet()) {
             final String destination = entry.getKey();
             InstanceConfig config = entry.getValue();
-            // 创建destination的工作节点
-            if (!embededCanalServer.isStart(destination)) {
-                // HA机制启动，利用ServerRunningMonitor运行监听器启动destination实例
+            if (!this.embededCanalServer.isStart(destination)) {
+                // 启动当前destination对应的实例，获取destination对应的【ServerRunningMonitor】运行监听器启动destination实例
                 ServerRunningMonitor runningMonitor = ServerRunningMonitors.getRunningMonitor(destination);
                 if (!config.getLazy() && !runningMonitor.isStart()) {
+                    // 如果未配置延迟启动 和 当前destination对应实例并没有启动过  =>  执行启动
                     runningMonitor.start();
                 }
             }
 
             if (autoScan) {
+                // 如果配置了实例配置变更自动扫描，则为当前destination的实例注册一个默认的配置变更监听后的处理动作类，后续才会开启该监听器
                 instanceConfigMonitors.get(config.getMode()).register(destination, defaultAction);
             }
         }
+
+        // 4. 如果配置了实例配置变更自动扫描, 则启动所有实例配置监听器
         if (autoScan) {
             instanceConfigMonitors.get(globalInstanceConfig.getMode()).start();
             for (InstanceConfigMonitor monitor : instanceConfigMonitors.values()) {
@@ -548,7 +552,7 @@ public class CanalController {
             }
         }
 
-        // 启动网络接口
+        // 4. 启动网络接口
         if (canalServer != null) {
             canalServer.start();
         }

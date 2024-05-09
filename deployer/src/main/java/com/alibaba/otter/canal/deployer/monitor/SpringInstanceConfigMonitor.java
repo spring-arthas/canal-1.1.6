@@ -69,6 +69,10 @@ public class SpringInstanceConfigMonitor extends AbstractCanalLifeCycle implemen
         lastFiles.clear();
     }
 
+    /**
+     * @param destination
+     * @param action 当前destination对应的处理动作
+     * */
     public void register(String destination, InstanceAction action) {
         if (action != null) {
             actions.put(destination, action);

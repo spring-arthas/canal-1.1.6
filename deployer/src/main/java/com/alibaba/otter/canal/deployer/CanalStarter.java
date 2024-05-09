@@ -90,7 +90,7 @@ public class CanalStarter {
             }
         }
 
-        // 2. 构建canalController调度控制器并启动，该控制器用于对canal instances的处理，并新建thread用于JVM退出时执行控制器关闭操作
+        // 2. 构建canalController调度控制器并启动，该控制器用于对canal instances的生成和启动，并新建thread用于JVM退出时执行控制器关闭操作
         controller = new CanalController(properties);
         controller.start();
         shutdownThread = new Thread(() -> {
