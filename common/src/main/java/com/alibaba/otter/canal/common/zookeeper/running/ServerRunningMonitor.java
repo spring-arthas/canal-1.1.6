@@ -49,6 +49,7 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
     public ServerRunningMonitor(){
         // 创建父节点
         dataListener = new IZkDataListener() {
+
             public void handleDataChange(String dataPath, Object data) throws Exception {
                 MDC.put("destination", destination);
                 ServerRunningData runningData = JsonUtils.unmarshalFromByte((byte[]) data, ServerRunningData.class);
@@ -62,6 +63,7 @@ public class ServerRunningMonitor extends AbstractCanalLifeCycle {
 
                 activeData = (ServerRunningData) runningData;
             }
+
             public void handleDataDeleted(String dataPath) throws Exception {
                 MDC.put("destination", destination);
                 mutex.set(false);

@@ -67,7 +67,6 @@ import com.alibaba.otter.canal.store.model.BatchMode;
  * @version 1.0.0
  */
 public class CanalInstanceWithManager extends AbstractCanalInstance {
-
     private static final Logger logger = LoggerFactory.getLogger(CanalInstanceWithManager.class);
     protected String            filter;                                                          // 过滤表达式
     protected CanalParameter    parameters;                                                      // 对应参数

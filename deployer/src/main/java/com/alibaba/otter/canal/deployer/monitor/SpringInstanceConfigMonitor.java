@@ -37,9 +37,7 @@ public class SpringInstanceConfigMonitor extends AbstractCanalLifeCycle implemen
     private InstanceAction                   defaultAction        = null;
     private Map<String, InstanceAction>      actions              = new MapMaker().makeMap();
     private Map<String, InstanceConfigFiles> lastFiles            = MigrateMap.makeComputingMap(InstanceConfigFiles::new);
-    private ScheduledExecutorService         executor             = Executors.newScheduledThreadPool(1,
-                                                                      new NamedThreadFactory("canal-instance-scan"));
-
+    private ScheduledExecutorService         executor             = Executors.newScheduledThreadPool(1, new NamedThreadFactory("canal-instance-scan"));
     private volatile boolean                 isFirst              = true;
 
     public Map<String, InstanceAction> getActions() {

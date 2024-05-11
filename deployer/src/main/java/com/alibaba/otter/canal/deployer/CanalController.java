@@ -376,23 +376,29 @@ public class CanalController {
             globalConfig.setManagerAddress(managerAddress);
         }
 
+        // 5. 读取 canal.properties 文件中的【canal.instance.global.spring.xml】配置属性值
         String springXml = getProperty(properties, CanalConstants.getInstancSpringXmlKey(CanalConstants.GLOBAL_NAME));
         if (StringUtils.isNotEmpty(springXml)) {
             globalConfig.setSpringXml(springXml);
         }
 
+        // 6. 创建实例生成器，所有的destinations都会通过该InstanceGenerator进行bean实例创建
         instanceGenerator = destination -> {
             InstanceConfig config = instanceConfigs.get(destination);
             if (config == null) {
                 throw new CanalServerException("can't find destination:" + destination);
             }
 
+            // 如果canal.properties文件配置了【canal.admin.manager】属性则最终该实例的配置信息会复用该配置，并设置每个实例配置的mode为Manager，那么
+            // 就按照PlainCanalInstanceGenerator创建实例bean
             if (config.getMode().isManager()) {
+                // 创建的 bean 实例对象为 CanalInstanceWithManager
                 PlainCanalInstanceGenerator instanceGenerator = new PlainCanalInstanceGenerator(properties);
                 instanceGenerator.setCanalConfigClient(managerClients.get(config.getManagerAddress()));
                 instanceGenerator.setSpringXml(config.getSpringXml());
                 return instanceGenerator.generate(destination);
             } else if (config.getMode().isSpring()) {
+                // 创建的 bean 实例对象为 CanalInstanceWithSpring
                 SpringCanalInstanceGenerator instanceGenerator = new SpringCanalInstanceGenerator();
                 instanceGenerator.setSpringXml(config.getSpringXml());
                 return instanceGenerator.generate(destination);
@@ -407,10 +413,12 @@ public class CanalController {
 
 
     /**
-     * 根据全局canal.properties配置初始化每个本地canal实例配置信息
+     * 根据全局canal.properties配置初始化本地每个canal实例配置信息
      * */
     private void initInstanceConfig(Properties properties) {
+        // 1. 读取 canal.properties => canal.destinations 配置，即需要为这些实例创建InstanceConfig
         String destinationStr = getProperty(properties, CanalConstants.CANAL_DESTINATIONS);
+        // 2. 根据逗号分割destinationStr，循环为每个destination创建InstanceConfig
         String[] destinations = StringUtils.split(destinationStr, CanalConstants.CANAL_DESTINATION_SPLIT);
         for (String destination : destinations) {
             InstanceConfig config = parseInstanceConfig(properties, destination);
@@ -422,12 +430,14 @@ public class CanalController {
     }
 
     /**
-     * 解析每个destination配置信息
+     * 解析canal.properties中【destinations处的实例相关配置】
      * @param properties 主配置
      * @param destination 实例名称
      * */
     private InstanceConfig parseInstanceConfig(Properties properties, String destination) {
+        // 1. 读取 canal.properties => canal.admin.manager
         String adminManagerAddress = getProperty(properties, CanalConstants.CANAL_ADMIN_MANAGER);
+        // 为当前destination创建对应的InstanceConfig配置类，并持有全局配置类GlobalInstanceConfig
         InstanceConfig config = new InstanceConfig(globalInstanceConfig);
         String modeStr = getProperty(properties, CanalConstants.getInstanceModeKey(destination));
         if (StringUtils.isNotEmpty(adminManagerAddress)) {
@@ -437,11 +447,13 @@ public class CanalController {
             config.setMode(InstanceMode.valueOf(StringUtils.upperCase(modeStr)));
         }
 
+        // 2. 读取 canal.properties => canal.instance.global.lazy
         String lazyStr = getProperty(properties, CanalConstants.getInstancLazyKey(destination));
         if (!StringUtils.isEmpty(lazyStr)) {
             config.setLazy(Boolean.valueOf(lazyStr));
         }
 
+        // 3. 读取 canal.properties => canal.instance.global.manager.address
         if (config.getMode().isManager()) {
             String managerAddress = getProperty(properties, CanalConstants.getInstanceManagerAddressKey(destination));
             if (StringUtils.isNotEmpty(managerAddress)) {
@@ -452,6 +464,7 @@ public class CanalController {
             }
         }
 
+        // 4. 读取 canal.properties => canal.instance.global.spring.xml
         String springXml = getProperty(properties, CanalConstants.getInstancSpringXmlKey(destination));
         if (StringUtils.isNotEmpty(springXml)) {
             config.setSpringXml(springXml);
@@ -520,10 +533,10 @@ public class CanalController {
             });
         }
 
-        // 2. 统计 + 创建实例生成托管Map
+        // 2. 统计 + 创建实例生成托管Map，tips: 此处并不是直接开始启动实例
         this.embededCanalServer.start();
 
-        // 3. 启动实例
+        // 3. 真正启动实例
         for (Map.Entry<String, InstanceConfig> entry : instanceConfigs.entrySet()) {
             final String destination = entry.getKey();
             InstanceConfig config = entry.getValue();
@@ -531,7 +544,7 @@ public class CanalController {
                 // 启动当前destination对应的实例，获取destination对应的【ServerRunningMonitor】运行监听器启动destination实例
                 ServerRunningMonitor runningMonitor = ServerRunningMonitors.getRunningMonitor(destination);
                 if (!config.getLazy() && !runningMonitor.isStart()) {
-                    // 如果未配置延迟启动 和 当前destination对应实例并没有启动过  =>  执行启动
+                    // 如果未配置延迟启动 和 当前destination对应实例并没有启动过  =>  执行实例启动，CanalInstanceWithManager实例启动
                     runningMonitor.start();
                 }
             }

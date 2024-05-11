@@ -3,7 +3,7 @@ package com.alibaba.otter.canal.parse.exception;
 import com.alibaba.otter.canal.common.CanalException;
 
 /**
- * canal 异常定义
+ * canal 异常定义, 抛出该异常目前会终止disruptor消费者
  * 
  * @author jianghang 2012-6-15 下午04:57:35
  * @version 1.0.0
