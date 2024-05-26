@@ -15,8 +15,10 @@ import com.alibaba.otter.canal.deployer.admin.CanalAdminController;
 import com.alibaba.otter.canal.server.CanalMQStarter;
 
 /**
- * Canal server 启动类
- *
+ * Canal server 启动类，主要工作如下
+ *    1. 构建基于MQ的生产者【CanalMQProducer】, 如果配置了MQ消费模式
+ *    2. 构建CanalController控制器类，启动destinations对应的实例
+ *    3. 如果第1步成立，则根据destinations个数构建同数量的CanalMQStarter分别启动CanalMQRunnable，destination <=> CanalMQRunnable
  * @author rewerma 2020-01-27
  * @version 1.0.2
  */
@@ -44,6 +46,10 @@ public class CanalStarter {
     private volatile boolean    running                   = false;
     private CanalAdminWithNetty canalAdmin;
 
+    /**
+     * 构造函数
+     * @param properties 来自CanalLauncher中透传过来的本地和远程进行合并了的【canal.properties】配置
+     * */
     public CanalStarter(Properties properties){
         this.properties = properties;
     }
@@ -65,7 +71,8 @@ public class CanalStarter {
      * @throws Throwable
      */
     public synchronized void start() throws Throwable {
-        // 1. 读取【canal.server.mode】配置参数，用于后续实例解析出的binlog数据的后置处理，是通过tcp方式消费还是通过MQ方式处理
+        // 1. 读取【canal.server.mode】配置参数，用于后续实例解析出的binlog数据的后置处理，是通过tcp方式消费还是通过MQ方式处理, 如果
+        // 配置的mq消费方式（即非tcp模式），那么根据SPI机制会构建【canalMQProducer】对象
         String serverMode = CanalController.getProperty(properties, CanalConstants.CANAL_SERVER_MODE);
         if (!"tcp".equalsIgnoreCase(serverMode)) {
             // SPI机制处理CanalMQProducer
@@ -79,7 +86,6 @@ public class CanalStarter {
                 Thread.currentThread().setContextClassLoader(cl);
             }
         }
-
         if (Objects.nonNull(canalMQProducer)) {
             MQProperties mqProperties = canalMQProducer.getMqProperties();
             // disable netty 禁用netty方式消费
@@ -91,6 +97,7 @@ public class CanalStarter {
         }
 
         // 2. 构建canalController调度控制器并启动，该控制器用于对canal instances的处理，并新建thread用于JVM退出时执行控制器关闭操作
+        // 同时再次将CanalLauncher中远程和本地合并后的【canal.properties】配置继续以构造方式透传给CanalStarter类
         controller = new CanalController(properties);
         controller.start();
         shutdownThread = new Thread(() -> {
@@ -106,8 +113,9 @@ public class CanalStarter {
         });
         Runtime.getRuntime().addShutdownHook(shutdownThread);
 
-        // 3. 构建CanalMQStarter启动canal instances个数对应的CanalMQRunnable，启动CanalMQRunnable用于不同实例对应的binlog解析数据
-        // 通过canalMQProducer发送到对应的MQ队列
+        // 3. 构建CanalMQStarter，启动instances个数对应的CanalMQRunnable，启动CanalMQRunnable用于不同实例对应的binlog解析数据
+        // 通过canalMQProducer发送到对应的MQ队列，=> 多个CanalMQRunnable共用同一个CanalMQProducer生产者用于向MQ发送binlog解析事件
+        // 数据
         if (Objects.nonNull(canalMQProducer)) {
             canalMQStarter = new CanalMQStarter(canalMQProducer);
             String destinations = CanalController.getProperty(properties, CanalConstants.CANAL_DESTINATIONS);

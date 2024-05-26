@@ -20,7 +20,10 @@ import com.alibaba.otter.canal.instance.manager.plain.PlainCanalConfigClient;
 
 /**
  * canal独立版本启动的入口类  canal-deployer启动类
- *
+ *     1. 读取本地canal.properties配置
+ *     2. 构建CanalStarter
+ *     3. 读取canal-admin管理端中名称为【canal.admin.register.name】指定的及群名称下【canal.properties】的远程配置并与第1步读取的本地配置进行合并
+ *     4. 启动canalStarter
  * @author jianghang 2012-11-6 下午05:20:49
  * @version 1.0.0
  */
@@ -36,7 +39,7 @@ public class CanalLauncher {
             logger.info("=>【deployer】开始启动......");
             setGlobalUncaughtExceptionHandler();
 
-            // 支持rocketmq client 配置日志路径
+            // 1. 支持rocketmq client 配置日志路径
             System.setProperty("rocketmq.client.logUseSlf4j","true");
 
             String conf = System.getProperty("canal.conf", "classpath:canal.properties");
@@ -48,10 +51,10 @@ public class CanalLauncher {
                 properties.load(new FileInputStream(conf));
             }
 
-            // 构建CanalStarter启动器类，在配置文件加载且合并完成后，通过该对象进行实例的启动
+            // 2. 构建CanalStarter启动器类，将远程和本地合并后的【canal.properties】配置以构造方式透传给CanalStarter类
             final CanalStarter canalStater = new CanalStarter(properties);
 
-            // 处理【canal.admin.manager】配置参数逻辑，即canal-deployer服务需要连接canal-admin平台读取各类配置
+            // 3. 处理【canal.admin.manager】配置参数逻辑，即canal-deployer服务需要连接canal-admin平台读取各类配置
             String managerAddress = CanalController.getProperty(properties, CanalConstants.CANAL_ADMIN_MANAGER);
             if (StringUtils.isNotEmpty(managerAddress)) {
                 beginCanalAdminPlatformManage(canalStater, properties, managerAddress);
@@ -59,7 +62,7 @@ public class CanalLauncher {
                 canalStater.setProperties(properties);
             }
 
-            // 启动canal服务
+            // 4. 启动canal服务
             canalStater.start();
             runningLatch.await();
             executor.shutdownNow();

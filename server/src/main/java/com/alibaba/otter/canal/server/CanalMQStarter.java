@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
+ * canal MQ消费模式下用于启动destination对应的CanalMQRunnable的启动类
  * @author debugcode
  */
 public class CanalMQStarter {

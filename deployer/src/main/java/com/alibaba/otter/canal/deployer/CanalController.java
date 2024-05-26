@@ -73,7 +73,7 @@ public class CanalController {
 
     /**
      * 调度控制器构造
-     * @param properties 本地和远程合并后的canal.properties配置
+     * @param properties 本地和远程合并后的canal.properties配置, 依据此配置来构建每个instance实例的配置信息
      * */
     public CanalController(final Properties properties){
         managerClients = MigrateMap.makeComputingMap(this::getManagerClient);
@@ -130,7 +130,8 @@ public class CanalController {
             ip = AddressUtils.getHostIp();
         }
         if (StringUtils.isEmpty(registerIp)) {
-            registerIp = ip; // 兼容以前配置
+            // 兼容以前配置
+            registerIp = ip;
         }
         final String zkServers = getProperty(properties, CanalConstants.CANAL_ZKSERVERS);
         if (StringUtils.isNotEmpty(zkServers)) {
