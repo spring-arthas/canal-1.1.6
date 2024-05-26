@@ -22,6 +22,7 @@ public class SpringCanalInstanceGenerator implements CanalInstanceGenerator {
     private String              defaultName = "instance";
     private BeanFactory         beanFactory;
 
+    @Override
     public CanalInstance generate(String destination) {
         synchronized (CanalEventParser.class) {
             try {

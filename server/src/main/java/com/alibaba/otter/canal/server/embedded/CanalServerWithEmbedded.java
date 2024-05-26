@@ -69,6 +69,7 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
         return SingletonHolder.CANAL_SERVER_WITH_EMBEDDED;
     }
 
+    @Override
     public void start() {
         if (!isStart()) {
             super.start();
@@ -76,12 +77,13 @@ public class CanalServerWithEmbedded extends AbstractCanalLifeCycle implements C
             loadCanalMetrics();
             metrics.setServerPort(metricsPort);
             metrics.initialize();
+            // canalInstanceGenerator在CanalController类中的构造方法中调用initGlobalConfig方法中创建
             canalInstances = MigrateMap.makeComputingMap(destination -> canalInstanceGenerator.generate(destination));
-
             // lastRollbackPostions = new MapMaker().makeMap();
         }
     }
 
+    @Override
     public void stop() {
         super.stop();
         for (Map.Entry<String, CanalInstance> entry : canalInstances.entrySet()) {

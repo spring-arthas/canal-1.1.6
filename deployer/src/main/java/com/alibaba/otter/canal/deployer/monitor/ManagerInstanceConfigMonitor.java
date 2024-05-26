@@ -59,6 +59,7 @@ public class ManagerInstanceConfigMonitor extends AbstractCanalLifeCycle impleme
         actions.clear();
     }
 
+    @Override
     public void register(String destination, InstanceAction action) {
         if (action != null) {
             actions.put(destination, action);
@@ -67,6 +68,7 @@ public class ManagerInstanceConfigMonitor extends AbstractCanalLifeCycle impleme
         }
     }
 
+    @Override
     public void unregister(String destination) {
         actions.remove(destination);
     }

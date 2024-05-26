@@ -34,6 +34,7 @@ public class PlainCanalInstanceGenerator implements CanalInstanceGenerator {
         this.canalConfig = canalConfig;
     }
 
+    @Override
     public CanalInstance generate(String destination) {
         synchronized (CanalEventParser.class) {
             try {
@@ -44,7 +45,6 @@ public class PlainCanalInstanceGenerator implements CanalInstanceGenerator {
                 Properties properties = canal.getProperties();
                 // merge local
                 properties.putAll(canalConfig);
-
                 // 设置动态properties,替换掉本地properties
                 com.alibaba.otter.canal.instance.spring.support.PropertyPlaceholderConfigurer.propertiesLocal.set(properties);
                 // 设置当前正在加载的通道，加载spring查找文件时会用到该变量
