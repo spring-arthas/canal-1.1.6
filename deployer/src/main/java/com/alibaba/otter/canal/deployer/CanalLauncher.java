@@ -41,7 +41,7 @@ public class CanalLauncher {
 
             // 1. 支持rocketmq client 配置日志路径
             System.setProperty("rocketmq.client.logUseSlf4j","true");
-
+            // 先读取本地的【canal.properties】文件的配置，后续会将该配置添加至CanalStarter启动类对象属性中
             String conf = System.getProperty("canal.conf", "classpath:canal.properties");
             Properties properties = new Properties();
             if (conf.startsWith(CLASSPATH_URL_PREFIX)) {
@@ -54,7 +54,9 @@ public class CanalLauncher {
             // 2. 构建CanalStarter启动器类，将远程和本地合并后的【canal.properties】配置以构造方式透传给CanalStarter类
             final CanalStarter canalStater = new CanalStarter(properties);
 
-            // 3. 处理【canal.admin.manager】配置参数逻辑，即canal-deployer服务需要连接canal-admin平台读取各类配置
+            // 3. 处理【canal.admin.manager】配置参数逻辑，即canal-deployer服务需要连接canal-admin平台读取【canal.properties】
+            // 配置，如果配置了管理端地址，则会将远程读取到的配置并覆盖第2步中已经设置进去的本地配置，即如果配置了会以远程的配置为主覆盖本地
+            // 的配置
             String managerAddress = CanalController.getProperty(properties, CanalConstants.CANAL_ADMIN_MANAGER);
             if (StringUtils.isNotEmpty(managerAddress)) {
                 beginCanalAdminPlatformManage(canalStater, properties, managerAddress);
