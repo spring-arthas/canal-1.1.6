@@ -582,7 +582,6 @@ public class MysqlEventParser extends AbstractMysqlEventParser implements CanalE
         }
         return preTransactionStartPosition.get();
     }
-
     // 根据时间查找binlog位置
     private EntryPosition findByStartTimeStamp(MysqlConnection mysqlConnection, Long startTimestamp) {
         EntryPosition endPosition = findEndPosition(mysqlConnection);

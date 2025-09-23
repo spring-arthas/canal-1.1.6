@@ -39,7 +39,7 @@ import com.taobao.tddl.dbsync.binlog.event.UpdateRowsLogEvent;
 import com.taobao.tddl.dbsync.binlog.event.WriteRowsLogEvent;
 
 /**
- * 针对解析器提供一个多阶段协同的处理
+ * 针对解析器提供一个多阶段协同的处理，协同处理依赖的是disruptor
  * 
  * <pre>
  * 1. 网络接收 (单线程)
@@ -57,7 +57,6 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     private LogEventConvert                   logEventConvert;
     private EventTransactionBuffer            transactionBuffer;
     private ErosaConnection                   connection;
-
     private int                               parserThreadCount;
     private int                               ringBufferSize;
     private RingBuffer<MessageEvent>          disruptorMsgBuffer;
@@ -75,9 +74,14 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     protected boolean                         filterDmlUpdate = false;
     protected boolean                         filterDmlDelete = false;
 
-    public MysqlMultiStageCoprocessor(int ringBufferSize, int parserThreadCount, LogEventConvert logEventConvert,
-                                      EventTransactionBuffer transactionBuffer, String destination,
-                                      boolean filterDmlInsert, boolean filterDmlUpdate, boolean filterDmlDelete){
+    public MysqlMultiStageCoprocessor(int ringBufferSize,
+                                      int parserThreadCount,
+                                      LogEventConvert logEventConvert,
+                                      EventTransactionBuffer transactionBuffer,
+                                      String destination,
+                                      boolean filterDmlInsert,
+                                      boolean filterDmlUpdate,
+                                      boolean filterDmlDelete){
         this.ringBufferSize = ringBufferSize;
         this.parserThreadCount = parserThreadCount;
         this.logEventConvert = logEventConvert;
@@ -92,18 +96,21 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
     public void start() {
         super.start();
         this.exception = null;
+        // 创建一个单生产者的RingBuffer,用于在各个阶段之间传递消息
         this.disruptorMsgBuffer = RingBuffer.createSingleProducer(new MessageEventFactory(),
             ringBufferSize,
             new BlockingWaitStrategy());
+        // 创建解析线程池,线程数可配置,默认为1
         int tc = parserThreadCount > 0 ? parserThreadCount : 1;
         this.parserExecutor = Executors.newFixedThreadPool(tc, new NamedThreadFactory("MultiStageCoprocessor-Parser-"
                                                                                       + destination));
-
+        // 创建其他阶段的线程池,固定2个线程
         this.stageExecutor = Executors.newFixedThreadPool(2, new NamedThreadFactory("MultiStageCoprocessor-other-"
                                                                                     + destination));
         SequenceBarrier sequenceBarrier = disruptorMsgBuffer.newBarrier();
         ExceptionHandler exceptionHandler = new SimpleFatalExceptionHandler();
-        // stage 2
+        
+        // 第2阶段:基本事件解析
         this.logContext = new LogContext();
         simpleParserStage = new BatchEventProcessor<>(disruptorMsgBuffer,
             sequenceBarrier,
@@ -111,7 +118,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         simpleParserStage.setExceptionHandler(exceptionHandler);
         disruptorMsgBuffer.addGatingSequences(simpleParserStage.getSequence());
 
-        // stage 3
+        // 第3阶段:DML事件的深度解析,使用多线程
         SequenceBarrier dmlParserSequenceBarrier = disruptorMsgBuffer.newBarrier(simpleParserStage.getSequence());
         WorkHandler<MessageEvent>[] workHandlers = new DmlParserStage[tc];
         for (int i = 0; i < tc; i++) {
@@ -124,13 +131,13 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         Sequence[] sequence = workerPool.getWorkerSequences();
         disruptorMsgBuffer.addGatingSequences(sequence);
 
-        // stage 4
+        // 第4阶段:将事件投递到store
         SequenceBarrier sinkSequenceBarrier = disruptorMsgBuffer.newBarrier(sequence);
         sinkStoreStage = new BatchEventProcessor<>(disruptorMsgBuffer, sinkSequenceBarrier, new SinkStoreStage());
         sinkStoreStage.setExceptionHandler(exceptionHandler);
         disruptorMsgBuffer.addGatingSequences(sinkStoreStage.getSequence());
 
-        // start work
+        // 启动所有阶段
         stageExecutor.submit(simpleParserStage);
         stageExecutor.submit(sinkStoreStage);
         workerPool.start(parserExecutor);
@@ -368,6 +375,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                     transactionBuffer.add(event.getEntry());
                 }
 
+                // dump处理成功，向master发送回执
                 LogEvent logEvent = event.getEvent();
                 if (connection instanceof MysqlConnection && logEvent.getSemival() == 1) {
                     // semi ack回报

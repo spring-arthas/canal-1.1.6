@@ -21,7 +21,6 @@ import org.apache.commons.lang.StringUtils;
 public abstract class AbstractMysqlEventParser extends AbstractEventParser {
 
     protected static final long    BINLOG_START_OFFEST       = 4L;
-
     protected TableMetaTSDBFactory tableMetaTSDBFactory      = new DefaultTableMetaTSDBFactory();
     protected boolean              enableTsdb                = false;
     protected int                  tsdbSnapshotInterval      = 24;
@@ -45,20 +44,17 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
     // instance received binlog bytes
     protected final AtomicLong     receivedBinlogBytes       = new AtomicLong(0L);
     private final AtomicLong       eventsPublishBlockingTime = new AtomicLong(0L);
-
+    /** 构建binlog解析器 */
     protected BinlogParser buildParser() {
         LogEventConvert convert = new LogEventConvert();
         if (eventFilter != null && eventFilter instanceof AviaterRegexFilter) {
             convert.setNameFilter((AviaterRegexFilter) eventFilter);
         }
-
         if (eventBlackFilter != null && eventBlackFilter instanceof AviaterRegexFilter) {
             convert.setNameBlackFilter((AviaterRegexFilter) eventBlackFilter);
         }
-
         convert.setFieldFilterMap(getFieldFilterMap());
         convert.setFieldBlackFilterMap(getFieldBlackFilterMap());
-
         convert.setCharset(connectionCharset);
         convert.setFilterQueryDcl(filterQueryDcl);
         convert.setFilterQueryDml(filterQueryDml);
@@ -98,13 +94,13 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
             }
         }
     }
-
+    /** 处理instance.properties中的【canal.instance.filter.field】配置 */
     @Override
     public void setFieldFilter(String fieldFilter) {
         super.setFieldFilter(fieldFilter);
 
         // 触发一下filter变更
-        if (binlogParser instanceof LogEventConvert) {
+        if (binlogParser instanceof LogEventConvert) { // 处理的配置参数为：canal.instance.filter.field标记的字段
             ((LogEventConvert) binlogParser).setFieldFilterMap(getFieldFilterMap());
         }
 
@@ -112,13 +108,13 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
             ((DatabaseTableMeta) tableMetaTSDB).setFieldFilterMap(getFieldFilterMap());
         }
     }
-
+    /** 处理instance.properties中的【canal.instance.filter.black.field】配置 */
     @Override
     public void setFieldBlackFilter(String fieldBlackFilter) {
         super.setFieldBlackFilter(fieldBlackFilter);
 
         // 触发一下filter变更
-        if (binlogParser instanceof LogEventConvert) {
+        if (binlogParser instanceof LogEventConvert) {  // 处理的配置参数为：canal.instance.filter.black.field标记的字段
             ((LogEventConvert) binlogParser).setFieldBlackFilterMap(getFieldBlackFilterMap());
         }
 
@@ -172,18 +168,21 @@ public abstract class AbstractMysqlEventParser extends AbstractEventParser {
 
         super.stop();
     }
-
+    /** 创建基于Disruptor组件的Mysql binlog解析后Entry对象处理器 */
     protected MultiStageCoprocessor buildMultiStageCoprocessor() {
         MysqlMultiStageCoprocessor mysqlMultiStageCoprocessor = new MysqlMultiStageCoprocessor(parallelBufferSize,
             parallelThreadSize,
-            (LogEventConvert) binlogParser,
+            (LogEventConvert) binlogParser, // binlogParser = LogEventConvert
             transactionBuffer,
-            destination, filterDmlInsert, filterDmlUpdate, filterDmlDelete);
+            destination, // 当前解析线程负责的instance名称
+            filterDmlInsert, // 是否需要过滤掉dml-insert false表示不过滤
+            filterDmlUpdate, // 是否需要过滤掉dml-update false表示不过滤
+            filterDmlDelete); // 是否需要过滤掉dml-delete false表示不过滤
         mysqlMultiStageCoprocessor.setEventsPublishBlockingTime(eventsPublishBlockingTime);
         return mysqlMultiStageCoprocessor;
     }
 
-    // ============================ setter / getter =========================
+    // ============================ setter / getter 以下setter方法调用均在xml中配置的bean进行实例化后的属性设置中进行调用 =========================
 
     public void setConnectionCharsetNumber(byte connectionCharsetNumber) {
         this.connectionCharsetNumber = connectionCharsetNumber;

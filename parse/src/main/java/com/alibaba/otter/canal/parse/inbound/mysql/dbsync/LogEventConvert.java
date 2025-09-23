@@ -63,7 +63,7 @@ import com.taobao.tddl.dbsync.binlog.event.mariadb.MariaGtidLogEvent;
 import com.taobao.tddl.dbsync.binlog.exception.TableIdNotFoundException;
 
 /**
- * 基于{@linkplain LogEvent}转化为Entry对象的处理
+ * 基于{@linkplain LogEvent}转化为Entry对象的处理，binlog解析器工具类
  * 
  * @author jianghang 2013-1-17 下午02:41:14
  * @version 1.0.0
