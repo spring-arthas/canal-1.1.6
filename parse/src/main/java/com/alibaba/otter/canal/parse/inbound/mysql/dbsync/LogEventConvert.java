@@ -390,7 +390,7 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
     }
 
     private Entry parseRowsQueryEvent(RowsQueryLogEvent event) {
-        if (filterQueryDml) {
+        if (filterQueryDml) { // 对应配置项：canal.instance.filter.query.dml
             return null;
         }
         // mysql5.6支持，需要设置binlog-rows-query-log-events=1，可详细打印原始DML语句

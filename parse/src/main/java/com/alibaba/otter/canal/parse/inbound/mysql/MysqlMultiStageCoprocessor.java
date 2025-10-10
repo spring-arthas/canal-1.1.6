@@ -194,6 +194,10 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         return this.publish(null, event);
     }
 
+    /**
+     * 发布数据：注意此处发布到RingBuffer中的数据是接收到master dump下来的原始binlog字节数据封装的LogBuffer对象，还未进行解析处理
+     *   逻辑：将LogBuffer数据封装进MessageEvent对象中
+     * */
     private boolean publish(LogBuffer buffer, LogEvent event) {
         if (!isStart()) {
             if (exception != null) {
@@ -254,9 +258,11 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         }
 
     }
-
+    /**
+     * 简单解析平台
+     * */
     private class SimpleParserStage implements EventHandler<MessageEvent>, LifecycleAware {
-
+        /** LogBuffer解码器，该解码器依据mysql binlog 二进制协议进行字节数据解析 */
         private LogDecoder decoder;
         private LogContext context;
 
@@ -267,23 +273,24 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                 context.setGtidSet(gtidSet);
             }
         }
-
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
             try {
                 LogEvent logEvent = event.getEvent();
                 if (logEvent == null) {
                     LogBuffer buffer = event.getBuffer();
+                    // 1. 解析字节数据为LogEvent对象
                     logEvent = decoder.decode(buffer, context);
                     event.setEvent(logEvent);
                 }
 
+                // 2. 针对事件类型进行处理
                 int eventType = logEvent.getHeader().getType();
                 TableMeta tableMeta = null;
                 boolean needDmlParse = false;
                 switch (eventType) {
                     case LogEvent.WRITE_ROWS_EVENT_V1:
                     case LogEvent.WRITE_ROWS_EVENT:
-                        if (!filterDmlInsert) {
+                        if (!filterDmlInsert) { // 对应配置数据为：canal.instance.filter.dml.insert
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((WriteRowsLogEvent) logEvent);
                             needDmlParse = true;
                         }
@@ -291,19 +298,19 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                     case LogEvent.UPDATE_ROWS_EVENT_V1:
                     case LogEvent.PARTIAL_UPDATE_ROWS_EVENT:
                     case LogEvent.UPDATE_ROWS_EVENT:
-                        if (!filterDmlUpdate) {
+                        if (!filterDmlUpdate) { // 对应配置数据为：canal.instance.filter.dml.update
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((UpdateRowsLogEvent) logEvent);
                             needDmlParse = true;
                         }
                         break;
                     case LogEvent.DELETE_ROWS_EVENT_V1:
                     case LogEvent.DELETE_ROWS_EVENT:
-                        if (!filterDmlDelete) {
+                        if (!filterDmlDelete) { // 对应配置数据为 canal.instance.filter.dml.delete
                             tableMeta = logEventConvert.parseRowsEventForTableMeta((DeleteRowsLogEvent) logEvent);
                             needDmlParse = true;
                         }
                         break;
-                    case LogEvent.ROWS_QUERY_LOG_EVENT:
+                    case LogEvent.ROWS_QUERY_LOG_EVENT: // 当binlog中事件类型为ROWS_QUERY_EVENT类型时需要进行dml解析
                         needDmlParse = true;
                         break;
                     default:
@@ -319,18 +326,18 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                 throw exception;
             }
         }
-
         @Override
         public void onStart() {
 
         }
-
         @Override
         public void onShutdown() {
 
         }
     }
-
+    /**
+     * Dml解析
+     * */
     private class DmlParserStage implements WorkHandler<MessageEvent>, LifecycleAware {
 
         @Override
@@ -340,7 +347,8 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                     int eventType = event.getEvent().getHeader().getType();
                     CanalEntry.Entry entry = null;
                     switch (eventType) {
-                        case LogEvent.ROWS_QUERY_LOG_EVENT:
+                        case LogEvent.ROWS_QUERY_LOG_EVENT: // 处理binlog中事件类型为ROWS_QUERY_EVENT类型的处理，该事件记录了原始
+                            // dml语句内容
                             entry = logEventConvert.parse(event.getEvent(), false);
                             break;
                         default:
@@ -366,7 +374,9 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
 
         }
     }
-
+    /**
+     * SinkStore转存
+     * */
     private class SinkStoreStage implements EventHandler<MessageEvent>, LifecycleAware {
 
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
@@ -394,20 +404,19 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                 throw exception;
             }
         }
-
         @Override
         public void onStart() {
 
         }
-
         @Override
         public void onShutdown() {
 
         }
     }
-
+    /**
+     * canal Disruptor中的RingBuffer中默认存储的MessageEvent用于存储binlog数据
+     * */
     static class MessageEvent {
-
         private LogBuffer        buffer;
         private CanalEntry.Entry entry;
         private boolean          needDmlParse = false;

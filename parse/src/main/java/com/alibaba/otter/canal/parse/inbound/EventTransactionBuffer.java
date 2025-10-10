@@ -77,6 +77,12 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
                 // 针对非DML的数据，直接输出，不进行buffer控制
                 EventType eventType = entry.getHeader().getEventType();
                 if (eventType != null && !isDml(eventType)) {
+                    // 对于ROWDATA类型下的DDL需要立即进行flush，为后续基于该操作的dml解析提供完整语义
+                    // 1.  ROWDATA类型 通常用于 DML，但某些非 DML 事件（如 DDL）在 Canal 中也可能被封装为 ROWDATA 类型的 Entry
+                    //    （尤其是在解析 QUERY 事件时），因此需要通过 eventType 进一步区分
+                    // 2. 非 DML 事件（尤其是 DDL）具有“边界”或“元数据变更”语义，
+                    //     如ALTER TABLE ADD COLUMN 会改变后续 DML 的结构。如果 DDL 被缓存在 buffer 中，而后面的 DML 先被消费，
+                    //     下游可能因 schema 不匹配而解析失败。因此，DDL 必须立即 flush，确保在后续 DML 之前被处理。
                     flush();
                 }
                 break;
@@ -98,6 +104,7 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
     private void put(CanalEntry.Entry data) throws InterruptedException {
         // 首先检查是否有空位
         if (checkFreeSlotAt(putSequence.get() + 1)) {
+            // 有空位，则存储数据至entries
             long current = putSequence.get();
             long next = current + 1;
 
@@ -162,7 +169,6 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
      * @version 1.0.0
      */
     public static interface TransactionFlushCallback {
-
         public void flush(List<CanalEntry.Entry> transaction) throws InterruptedException;
     }
 

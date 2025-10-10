@@ -236,6 +236,7 @@ public class MysqlConnection implements ErosaConnection {
             fetcher.start(connector.getChannel());
             while (fetcher.fetch()) {
                 accumulateReceivedBytes(fetcher.limit());
+                // 将fetcher中获取到的数据写入LogBuffer
                 LogBuffer buffer = fetcher.duplicate();
                 fetcher.consume(fetcher.limit());
                 if (!coprocessor.publish(buffer)) {
