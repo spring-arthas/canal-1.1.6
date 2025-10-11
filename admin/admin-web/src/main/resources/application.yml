@@ -6,10 +6,10 @@ spring:
     time-zone: GMT+8
 
 spring.datasource:
-  address: localhost:3306
-  database: canal_manager
-  username: root
-  password: 911025pfz
+  address: 10.30.5.33:31288
+  database: jxgy_saas_test
+  username: jxgy
+  password: Fbhu0359
   driver-class-name: com.mysql.jdbc.Driver
   url: jdbc:mysql://${spring.datasource.address}/${spring.datasource.database}?useUnicode=true&characterEncoding=UTF-8&useSSL=false
   hikari:
