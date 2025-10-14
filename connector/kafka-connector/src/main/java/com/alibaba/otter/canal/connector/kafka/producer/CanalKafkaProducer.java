@@ -144,7 +144,8 @@ public class CanalKafkaProducer extends AbstractMQProducer implements CanalMQPro
         try {
             List result;
             if (!StringUtils.isEmpty(mqDestination.getDynamicTopic())) {
-                // 动态topic路由计算,只是基于schema/table,不涉及proto数据反序列化
+                // 动态topic路由计算,只是基于schema/table,不涉及proto数据反序列化，即根据instance.properties中配置的主题分区进行分组
+                // ，即当前message消息总共需要发送哪些topic对应的分区，默认都是单主题单分区
                 Map<String, Message> messageMap = MQMessageUtils.messageTopics(message,
                     mqDestination.getTopic(),
                     mqDestination.getDynamicTopic());

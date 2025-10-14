@@ -30,7 +30,6 @@ import com.alibaba.otter.canal.store.model.Event;
  * @version 1.0.0
  */
 public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry>> implements CanalEventSink<List<CanalEntry.Entry>> {
-
     private static final Logger    logger                        = LoggerFactory.getLogger(EntryEventSink.class);
     private static final int       maxFullTimes                  = 10;
     private CanalEventStore<Event> eventStore;
@@ -80,13 +79,12 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
     }
 
     public boolean sink(List<CanalEntry.Entry> entrys, InetSocketAddress remoteAddress, String destination)
-                                                                                                           throws CanalSinkException,
-                                                                                                           InterruptedException {
+        throws CanalSinkException, InterruptedException {
         return sinkData(entrys, remoteAddress);
     }
 
     private boolean sinkData(List<CanalEntry.Entry> entrys, InetSocketAddress remoteAddress)
-                                                                                            throws InterruptedException {
+        throws InterruptedException {
         boolean hasRowData = false;
         boolean hasHeartBeat = false;
         List<Event> events = new ArrayList<>();
@@ -95,19 +93,28 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
                 continue;
             }
 
-            if (filterTransactionEntry && (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND)) {
+            if (filterTransactionEntry // 对应canal.properties中canal.instance.filter.transaction.entry属性配置
+                && (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND)
+            ) {
+                // 提取当前entry对应的mysql事件时间戳
                 long currentTimestamp = entry.getHeader().getExecuteTime();
-                // 基于一定的策略控制，放过空的事务头和尾，便于及时更新数据库位点，表明工作正常
+                // 基于一定的策略控制，放过空的事务头和尾，便于及时更新数据库位点，表明工作正常，补充说明：即当前事务事件产生的数量未超过事务
+                // 阈值（事务数量按照事件数量来统计，即EntryType.TRANSACTIONBEGIN 和 EntryType.TRANSACTIONEND算两个事件），另外还需
+                // 判断当前循环的事务事件的执行时间与上次记录的完整事务的结束事件时的时间间隔，如果未超过阈值且未到达时间间隔，则继续，否则判
+                // 断下是否是事务结束事件，如果是说明此时的事务的结束事件刚好达到阈值条件，那么记录下此次事务的执行时间
+                //
+                // emptyTransctionThresold = 8192
+                // emptyTransactionInterval = 5 * 1000
                 if (lastTransactionCount.incrementAndGet() <= emptyTransctionThresold
                     && Math.abs(currentTimestamp - lastTransactionTimestamp) <= emptyTransactionInterval) {
                     continue;
-                } else {
-                    // fixed issue https://github.com/alibaba/canal/issues/2616
-                    // 主要原因在于空事务只发送了begin，没有同步发送commit信息，这里修改为只对commit事件做计数更新，确保begin/commit成对出现
-                    if (entry.getEntryType() == EntryType.TRANSACTIONEND) {
-                        lastTransactionCount.set(0L);
-                        lastTransactionTimestamp = currentTimestamp;
-                    }
+                }
+
+                // fixed issue https://github.com/alibaba/canal/issues/2616
+                // 主要原因在于空事务只发送了begin，没有同步发送commit信息，这里修改为只对commit事件做计数更新，确保begin/commit成对出现
+                if (entry.getEntryType() == EntryType.TRANSACTIONEND) {
+                    lastTransactionCount.set(0L);
+                    lastTransactionTimestamp = currentTimestamp;
                 }
             }
 
@@ -121,7 +128,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
             // 存在row记录 或者 存在heartbeat记录，直接跳给后续处理
             return doSink(events);
         } else {
-            // 需要过滤的数据
+            // 执行到此处，说明events中存在的事件数据都不是有效数据，即需要过滤的数据，再次执行过滤操作
             if (filterEmtryTransactionEntry && !CollectionUtils.isEmpty(events)) {
                 long currentTimestamp = events.get(0).getExecuteTime();
                 // 基于一定的策略控制，放过空的事务头和尾，便于及时更新数据库位点，表明工作正常
@@ -133,7 +140,7 @@ public class EntryEventSink extends AbstractCanalEventSink<List<CanalEntry.Entry
                 }
             }
 
-            // 直接返回true，忽略空的事务头和尾
+            // 直接返回true，忽略空的事务头和尾，补充：更新zookeeper解析位点
             return true;
         }
     }

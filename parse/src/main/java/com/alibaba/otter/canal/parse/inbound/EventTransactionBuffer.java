@@ -13,26 +13,21 @@ import com.alibaba.otter.canal.store.CanalStoreException;
 
 /**
  * 缓冲event队列，提供按事务刷新数据的机制
- * 
+ *   存在配置项：canal.properties文件中的【canal.instance.transaction.size】参数值
  * @author jianghang 2012-12-6 上午11:05:12
  * @version 1.0.0
  */
 public class EventTransactionBuffer extends AbstractCanalLifeCycle {
-
     private static final long        INIT_SQEUENCE = -1;
-    private int                      bufferSize    = 1024;
+    private int                      bufferSize    = 1024; // 该参数值可动态来自canal.properties中canal.instance.transaction.size参数设置的值
     private int                      indexMask;
     private CanalEntry.Entry[]       entries;
-
     private AtomicLong               putSequence   = new AtomicLong(INIT_SQEUENCE); // 代表当前put操作最后一次写操作发生的位置
     private AtomicLong               flushSequence = new AtomicLong(INIT_SQEUENCE); // 代表满足flush条件后最后一次数据flush的时间
-
     private TransactionFlushCallback flushCallback;
-
     public EventTransactionBuffer(){
 
     }
-
     public EventTransactionBuffer(TransactionFlushCallback flushCallback){
         this.flushCallback = flushCallback;
     }
@@ -122,6 +117,8 @@ public class EventTransactionBuffer extends AbstractCanalLifeCycle {
         long end = this.putSequence.get();
 
         if (start <= end) {
+            // 将start和end之间的所有Canal.Entry数据集都添加至EventStore中，这个添加过程无法保证entries中添加进去的数据都是按照事务边界
+            // 进行添加
             List<CanalEntry.Entry> transaction = new ArrayList<>();
             for (long next = start; next <= end; next++) {
                 transaction.add(this.entries[getIndex(next)]);

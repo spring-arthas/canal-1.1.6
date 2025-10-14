@@ -221,6 +221,7 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                 long next = disruptorMsgBuffer.tryNext();
                 MessageEvent data = disruptorMsgBuffer.get(next);
                 if (buffer != null) {
+                    // 设置进去的是DirectLogFetcher从socket拉取出来的binlog字节数据
                     data.setBuffer(buffer);
                 } else {
                     data.setEvent(event);
@@ -265,7 +266,6 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         /** LogBuffer解码器，该解码器依据mysql binlog 二进制协议进行字节数据解析 */
         private LogDecoder decoder;
         private LogContext context;
-
         public SimpleParserStage(LogContext context){
             decoder = new LogDecoder(LogEvent.UNKNOWN_EVENT, LogEvent.ENUM_END_EVENT);
             this.context = context;
@@ -275,14 +275,13 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
         }
         public void onEvent(MessageEvent event, long sequence, boolean endOfBatch) throws Exception {
             try {
+                // 1. 按照mysql binlog二进制字节协议解析数据为LogEvent对象
                 LogEvent logEvent = event.getEvent();
                 if (logEvent == null) {
                     LogBuffer buffer = event.getBuffer();
-                    // 1. 解析字节数据为LogEvent对象
                     logEvent = decoder.decode(buffer, context);
                     event.setEvent(logEvent);
                 }
-
                 // 2. 针对事件类型进行处理
                 int eventType = logEvent.getHeader().getType();
                 TableMeta tableMeta = null;
@@ -310,7 +309,8 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
                             needDmlParse = true;
                         }
                         break;
-                    case LogEvent.ROWS_QUERY_LOG_EVENT: // 当binlog中事件类型为ROWS_QUERY_EVENT类型时需要进行dml解析
+                    case LogEvent.ROWS_QUERY_LOG_EVENT: // 当binlog中事件类型为ROWS_QUERY_EVENT类型时需要进行dml解析，用于解析
+                                                        // 出本次DML操作原始数据
                         needDmlParse = true;
                         break;
                     default:
@@ -339,7 +339,6 @@ public class MysqlMultiStageCoprocessor extends AbstractCanalLifeCycle implement
      * Dml解析
      * */
     private class DmlParserStage implements WorkHandler<MessageEvent>, LifecycleAware {
-
         @Override
         public void onEvent(MessageEvent event) throws Exception {
             try {

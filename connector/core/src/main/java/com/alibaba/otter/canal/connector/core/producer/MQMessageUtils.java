@@ -139,6 +139,7 @@ public class MQMessageUtils {
     public static Map<String, Message> messageTopics(Message message, String defaultTopic, String dynamicTopicConfigs) {
         List<CanalEntry.Entry> entries;
         if (message.isRaw()) {
+            // 配置为当前消息需要按照二进制格式进行发送，将ByteString类型消息解析为Canal.Entry进行发送
             List<ByteString> rawEntries = message.getRawEntries();
             entries = new ArrayList<>(rawEntries.size());
             for (ByteString byteString : rawEntries) {
@@ -151,16 +152,16 @@ public class MQMessageUtils {
                 entries.add(entry);
             }
         } else {
+            // 当前消息需要按照canal转换后的格式进行发送
             entries = message.getEntries();
         }
         Map<String, Message> messages = new HashMap<>();
         for (CanalEntry.Entry entry : entries) {
-            // 如果有topic路由,则忽略begin/end事件
-            if (entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONBEGIN
-                || entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONEND) {
+            // 如果有topic路由,则忽略begin/end事件，即忽略事务开始和结束事件
+            if (entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONBEGIN || entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONEND) {
                 continue;
             }
-
+            // 只处理ROW_DATA数据
             String schemaName = entry.getHeader().getSchemaName();
             String tableName = entry.getHeader().getTableName();
 

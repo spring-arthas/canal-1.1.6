@@ -22,7 +22,7 @@ public interface MultiStageCoprocessor extends CanalLifeCycle {
     /**
      * 网络数据投递
      */
-    public boolean publish(LogBuffer buffer);
+    boolean publish(LogBuffer buffer);
 
-    public boolean publish(LogEvent event);
+    boolean publish(LogEvent event);
 }
