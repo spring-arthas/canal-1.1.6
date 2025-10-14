@@ -116,11 +116,11 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
 
         int eventType = logEvent.getHeader().getType();
         switch (eventType) {
-            case LogEvent.QUERY_EVENT:
+            case LogEvent.QUERY_EVENT: // dcl\ddl也包含事务开始事件
                 return parseQueryEvent((QueryLogEvent) logEvent, isSeek);
-            case LogEvent.XID_EVENT:
+            case LogEvent.XID_EVENT: // 事务结束事件
                 return parseXidEvent((XidLogEvent) logEvent);
-            case LogEvent.TABLE_MAP_EVENT:
+            case LogEvent.TABLE_MAP_EVENT: // 表映射事件
                 parseTableMapEvent((TableMapLogEvent) logEvent);
                 break;
             case LogEvent.WRITE_ROWS_EVENT_V1:
@@ -133,7 +133,7 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
             case LogEvent.DELETE_ROWS_EVENT_V1:
             case LogEvent.DELETE_ROWS_EVENT:
                 return parseRowsEvent((DeleteRowsLogEvent) logEvent);
-            case LogEvent.ROWS_QUERY_LOG_EVENT:
+            case LogEvent.ROWS_QUERY_LOG_EVENT: // 仅解析dml中涉及到的原始数据，对应mysql参数binlog_rows_query_log_events=ON参数
                 return parseRowsQueryEvent((RowsQueryLogEvent) logEvent);
             case LogEvent.ANNOTATE_ROWS_EVENT:
                 return parseAnnotateRowsEvent((AnnotateRowsEvent) logEvent);
@@ -336,9 +336,12 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
         }
 
         // fixed issue https://github.com/alibaba/canal/issues/58
-        if (result.getType() == EventType.ALTER || result.getType() == EventType.ERASE
-            || result.getType() == EventType.CREATE || result.getType() == EventType.TRUNCATE
-            || result.getType() == EventType.RENAME || result.getType() == EventType.CINDEX
+        if (result.getType() == EventType.ALTER
+            || result.getType() == EventType.ERASE
+            || result.getType() == EventType.CREATE
+            || result.getType() == EventType.TRUNCATE
+            || result.getType() == EventType.RENAME
+            || result.getType() == EventType.CINDEX
             || result.getType() == EventType.DINDEX) { // 针对DDL类型
 
             if (!filterQueryDdl && (StringUtils.isEmpty(tableName)
@@ -376,8 +379,9 @@ public class LogEventConvert extends AbstractCanalLifeCycle implements BinlogPar
                     }
                 }
             }
-        } else if (result.getType() == EventType.INSERT || result.getType() == EventType.UPDATE
-                   || result.getType() == EventType.DELETE) {
+        } else if (result.getType() == EventType.INSERT
+            || result.getType() == EventType.UPDATE
+            || result.getType() == EventType.DELETE) {
             // 对外返回，保证兼容，还是返回QUERY类型，这里暂不解析tableName，所以无法支持过滤
             if (filterQueryDml) {
                 return true;

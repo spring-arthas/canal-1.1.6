@@ -397,17 +397,13 @@ public abstract class AbstractEventParser<EVENT> extends AbstractCanalLifeCycle 
         if (enabled) {
             startTs = System.currentTimeMillis();
         }
-
         boolean result = eventSink.sink(entrys, (runningInfo == null) ? null : runningInfo.getAddress(), destination);
-
         if (enabled) {
             this.processingInterval = System.currentTimeMillis() - startTs;
         }
-
         if (consumedEventCount.incrementAndGet() < 0) {
             consumedEventCount.set(0);
         }
-
         return result;
     }
     protected CanalEntry.Entry parseAndProfilingIfNecessary(EVENT bod, boolean isSeek) throws Exception {
